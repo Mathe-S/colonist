@@ -332,3 +332,94 @@ suggestBuildPriority() {
 4. Development card play timing
 5. Opponent resource probability (steal targeting)
 6. End-game VP path calculation
+
+---
+
+## Message Viewer App (Svelte)
+
+A debugging tool to replay game messages one-by-one and visualize their effects.
+
+**Location:** `/message-viewer/`
+
+### Phase 1: Project Setup ✅
+- [x] Initialize Svelte project with Vite
+- [x] Set up project structure
+- [x] Configure to load JSON file from public folder
+- [x] Basic dev server on localhost
+
+### Phase 2: Core State Management ✅
+- [x] Create GameState store (Svelte writable)
+- [x] Message parser that processes each message type
+- [x] Cumulative state builder (apply message → update state)
+- [x] Support stepping forward/backward through messages
+
+### Phase 3: Message Type Labels (Reverse Engineering) ✅
+- [x] Type 1: `SESSION_START` - Game session initialization
+- [x] Type 2: `SESSION_ID` - Session identifier
+- [x] Type 4: `FULL_STATE` - Complete game state snapshot
+- [x] Type 5: `PAUSE_STATE` - Game pause status
+- [x] Type 6: `READY_STATE` - Player ready status
+- [x] Type 28: `RESOURCE_DISTRIBUTION` - Who got what resources
+- [x] Type 30: `AVAILABLE_SETTLEMENTS` - Valid settlement spots
+- [x] Type 31: `AVAILABLE_ROADS` - Valid road spots
+- [x] Type 32: `AVAILABLE_CITIES` - Valid city upgrade spots
+- [x] Type 33: `AVAILABLE_ROBBER_SPOTS` - Valid robber placement tiles
+- [x] Type 48: `EMOTES_LIST` - Available emotes
+- [x] Type 59: `TRADE_OFFERS` - Active trade offers
+- [x] Type 62: `TRADE_STATE` - Trade state changes
+- [x] Type 69: `PING` - Keep-alive ping
+- [x] Type 78: `GAME_ACTIVE` - Game active status
+- [x] Type 80: `TURN_END` - Turn ended
+- [x] Type 91: `STATE_DIFF` - Incremental state update
+
+### Phase 4: JSON Viewer Panel ✅
+- [x] Display current message with syntax highlighting
+- [x] Show message type label and description
+- [x] Highlight payload differences from previous state
+- [x] Collapsible JSON tree view
+
+### Phase 5: Game Board Visualization ✅
+- [x] Render hex grid (19 tiles)
+- [x] Display tile types with colors (wood, brick, sheep, wheat, ore, desert)
+- [x] Show dice numbers on tiles
+- [ ] Display ports around the board (TODO: improve port rendering)
+- [x] Render settlements/cities on corners
+- [x] Render roads on edges
+- [x] Show robber position
+- [x] Highlight available spots when message is applied
+
+### Phase 6: Player Info Panel ✅
+- [x] Show all players with colors
+- [x] Display resource cards (for own player)
+- [ ] Show victory points (TODO)
+- [x] Display current turn indicator
+- [x] Show current action state
+
+### Phase 7: Controls & Navigation ✅
+- [x] Step forward button (→)
+- [x] Step backward button (←)
+- [x] Message index display (e.g., "5 / 20")
+- [x] Jump to specific message (input field)
+- [x] Keyboard shortcuts (arrow keys)
+- [ ] Reset to beginning button (use backward to go to 0)
+
+### Phase 8: Polish
+- [ ] Responsive layout (side-by-side panels)
+- [ ] Dark theme styling
+- [ ] Loading state for JSON
+- [ ] Error handling for malformed messages
+- [ ] Message timestamp display
+
+### Tech Stack
+- **Framework:** Svelte + Vite
+- **Styling:** CSS (or Tailwind if preferred)
+- **State:** Svelte stores
+- **No backend needed** - pure client-side
+
+### Game Constants Reference
+```javascript
+TILE_TYPES = { 0: 'desert', 1: 'wheat', 2: 'sheep', 3: 'ore', 4: 'wood', 5: 'brick' }
+RESOURCES = { 1: 'wood', 2: 'sheep', 3: 'ore', 4: 'wheat', 5: 'brick' }
+PORTS = { 1: '3:1', 2: 'sheep', 3: 'brick', 4: 'ore', 5: 'wood', 6: 'wheat' }
+PLAYER_COLORS = { 1: 'red', 2: 'blue', 3: 'orange', 4: 'white' }
+```
