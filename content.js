@@ -668,9 +668,14 @@
       
       html += `
           </div>
-          <button class="ca-btn ca-btn-secondary" id="ca-download-last20-btn">
-            📥 Download Last 20 Messages
-          </button>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="ca-btn ca-btn-secondary" id="ca-download-last20-btn">
+              📥 Download Last 20 Messages
+            </button>
+            <button class="ca-btn ca-btn-secondary" id="ca-download-all-btn">
+              📥 Download All Messages
+            </button>
+          </div>
         </div>
       `;
       
@@ -679,9 +684,14 @@
     
     // Called after render to attach event listeners
     attachEventListeners() {
-      const downloadBtn = document.getElementById('ca-download-last20-btn');
-      if (downloadBtn) {
-        downloadBtn.onclick = () => this.downloadLast20();
+      const downloadLast20Btn = document.getElementById('ca-download-last20-btn');
+      if (downloadLast20Btn) {
+        downloadLast20Btn.onclick = () => this.downloadLast20();
+      }
+      
+      const downloadAllBtn = document.getElementById('ca-download-all-btn');
+      if (downloadAllBtn) {
+        downloadAllBtn.onclick = () => this.downloadAll();
       }
     },
     
@@ -712,6 +722,35 @@
       URL.revokeObjectURL(url);
       
       console.log(`${LOG_PREFIX} 📥 Downloaded last ${messages.length} messages`);
+    },
+    
+    downloadAll() {
+      const messages = GameState.messageLog;
+      const data = {
+        exportedAt: new Date().toISOString(),
+        description: 'All messages for debugging',
+        gameInfo: {
+          myColor: GameState.myColor,
+          players: GameState.players,
+          currentAction: GameState.currentAction,
+          currentTurnColor: GameState.currentTurnColor
+        },
+        messageCount: messages.length,
+        messages: messages
+      };
+      
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `colonist-all-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log(`${LOG_PREFIX} 📥 Downloaded all ${messages.length} messages`);
     },
 
     renderBuildOptions() {
