@@ -161,7 +161,7 @@
         const result = read();
         // Check for remaining bytes (might indicate multiple messages)
         if (offset < uint8Array.length) {
-          console.log(`${LOG_PREFIX} ⚠️ MessagePack: ${uint8Array.length - offset} bytes remaining after decode`);
+        //   console.log(`${LOG_PREFIX} ⚠️ MessagePack: ${uint8Array.length - offset} bytes remaining after decode`);
         }
         return result;
       } catch (e) {
@@ -401,20 +401,14 @@
           timestamp: Date.now(),
           data: decoded
         });
-        
-        // Log all non-heartbeat messages to understand structure
-        console.log(`${LOG_PREFIX} 📦 Received:`, JSON.stringify(decoded).substring(0, 200) + '...');
       }
 
       // Handle different message types
       let result = {};
       if (decoded.type !== undefined) {
-        console.log(`${LOG_PREFIX} 🔍 Has type: ${decoded.type}`);
         result = this.handleTypedMessage(decoded) || {};
       } else if (decoded.id !== undefined) {
         result = this.handleIdMessage(decoded) || {};
-      } else {
-        console.log(`${LOG_PREFIX} ⚠️ Unknown message structure:`, Object.keys(decoded));
       }
 
       return { ...result, decoded };
@@ -423,23 +417,28 @@
     handleTypedMessage(msg) {
       const { type, payload, sequence } = msg;
       
-      console.log(`${LOG_PREFIX} 🔍 handleTypedMessage - type=${type}, hasPayload=${!!payload}`);
-      
       // Type 4 = Full game state (game started)
       if (type === 4) {
-        console.log(`${LOG_PREFIX} 🎮 TYPE 4 DETECTED!`);
         if (payload) {
           console.log(`${LOG_PREFIX} 🎮 GAME STARTED - Parsing full state...`);
-          console.log(`${LOG_PREFIX} 🎮 Payload keys:`, Object.keys(payload));
           this.parseFullGameState(payload);
           return { isGameStart: true };
-        } else {
-          console.log(`${LOG_PREFIX} ⚠️ Type 4 but no payload!`, msg);
         }
+        return {};
       }
       
-      // Log other message types
-      console.log(`${LOG_PREFIX} 📨 Message type ${type}:`, JSON.stringify(msg).substring(0, 300));
+      // Type 91 and others = Game state diff updates
+      if (payload?.diff) {
+        this.parseDiffUpdate(payload.diff);
+        return { isGameUpdate: true };
+      }
+      
+      // Type with payload but no diff - might have other useful data
+      if (payload) {
+        // Check for player resources, game log, etc.
+        if (payload.playerStates) this.parsePlayerStatesUpdate(payload.playerStates);
+        if (payload.currentState) this.parseCurrentStateUpdate(payload.currentState);
+      }
       
       return {};
     },
@@ -453,11 +452,9 @@
         return { isHeartbeat: true };
       }
       
-      console.log(`${LOG_PREFIX} 🔍 handleIdMessage - id=${id}, data keys:`, data ? Object.keys(data) : 'null');
-      
       // Check if data contains type 4 (game start might be wrapped)
       if (data?.type === 4 && data?.payload) {
-        console.log(`${LOG_PREFIX} 🎮 GAME START found inside id message!`);
+        console.log(`${LOG_PREFIX} 🎮 GAME STARTED - Parsing full state...`);
         this.parseFullGameState(data.payload);
         return { isGameStart: true };
       }
@@ -468,8 +465,6 @@
           this.parseDiffUpdate(data.payload.diff);
           return { isGameUpdate: true };
         }
-        // Log what we got for ID 130
-        console.log(`${LOG_PREFIX} 📨 ID 130 data:`, JSON.stringify(data).substring(0, 300));
       }
       
       return {};
@@ -642,24 +637,19 @@
       
       // Current state update
       if (diff.currentState) {
-        const { actionState, currentTurnPlayerColor, completedTurns } = diff.currentState;
-        if (actionState !== undefined) {
-          GameState.currentAction = ACTION_STATES[actionState] || actionState;
-        }
-        if (currentTurnPlayerColor !== undefined) {
-          GameState.currentTurnColor = currentTurnPlayerColor;
-        }
-        if (completedTurns !== undefined) {
-          GameState.completedTurns = completedTurns;
-          const numPlayers = Object.keys(GameState.players).length;
-          GameState.isSetupPhase = completedTurns < numPlayers * 2;
-        }
-        
-        // Check if it's our turn to place
-        if (GameState.isSetupPhase && 
-            GameState.currentTurnColor === GameState.myColor &&
-            GameState.currentAction === 'place_settlement') {
-          setTimeout(() => Advisor.suggestInitialPlacement(), 100);
+        this.parseCurrentStateUpdate(diff.currentState);
+      }
+      
+      // Map state update (initial board)
+      if (diff.mapState) {
+        if (diff.mapState.tileHexStates) {
+          for (const [id, tile] of Object.entries(diff.mapState.tileHexStates)) {
+            GameState.tiles[id] = {
+              ...tile,
+              resource: TILE_TYPES[tile.type] || 'unknown',
+              probability: DICE_PROBABILITY[tile.diceNumber] || 0
+            };
+          }
         }
       }
       
@@ -680,6 +670,70 @@
         }
       }
       console.log(`${LOG_PREFIX} 💰 My resources:`, GameState.myResources);
+    },
+    
+    parseCurrentStateUpdate(currentState) {
+      const { actionState, currentTurnPlayerColor, completedTurns } = currentState;
+      const prevAction = GameState.currentAction;
+      
+      if (actionState !== undefined) {
+        GameState.currentAction = ACTION_STATES[actionState] || actionState;
+      }
+      if (currentTurnPlayerColor !== undefined) {
+        GameState.currentTurnColor = currentTurnPlayerColor;
+      }
+      if (completedTurns !== undefined) {
+        GameState.completedTurns = completedTurns;
+        const numPlayers = Object.keys(GameState.players).length || 4;
+        GameState.isSetupPhase = completedTurns < numPlayers * 2;
+      }
+      
+      // Log turn changes
+      if (currentTurnPlayerColor !== undefined) {
+        const playerName = GameState.players[currentTurnPlayerColor]?.username || PLAYER_COLORS[currentTurnPlayerColor];
+        const isMyTurn = currentTurnPlayerColor === GameState.myColor;
+        console.log(`${LOG_PREFIX} 🎯 ${isMyTurn ? '>>> YOUR TURN <<<' : `${playerName}'s turn`} - Action: ${GameState.currentAction}`);
+      }
+      
+      // Suggest actions when it's our turn
+      if (GameState.currentTurnColor === GameState.myColor) {
+        setTimeout(() => {
+          if (GameState.currentAction === 'place_settlement') {
+            Advisor.suggestInitialPlacement();
+          } else if (GameState.currentAction === 'place_road') {
+            Advisor.suggestRoadPlacement();
+          } else if (GameState.currentAction === 'main_turn' || GameState.currentAction === 7) {
+            Advisor.suggestBuildPriority();
+          }
+        }, 100);
+      }
+    },
+    
+    parsePlayerStatesUpdate(playerStates) {
+      for (const [colorId, state] of Object.entries(playerStates)) {
+        if (!GameState.players[colorId]) {
+          GameState.players[colorId] = { color: parseInt(colorId), colorName: PLAYER_COLORS[colorId] };
+        }
+        
+        // Victory points
+        if (state.victoryPointsState) {
+          let vp = 0;
+          for (const val of Object.values(state.victoryPointsState)) {
+            if (typeof val === 'number') vp += val;
+          }
+          const oldVP = GameState.players[colorId].victoryPoints || 0;
+          if (vp !== oldVP) {
+            GameState.players[colorId].victoryPoints = vp;
+            const playerName = GameState.players[colorId].username || PLAYER_COLORS[colorId];
+            console.log(`${LOG_PREFIX} 🏆 ${playerName}: ${vp} VP`);
+          }
+        }
+        
+        // My resources
+        if (parseInt(colorId) === GameState.myColor && state.resourceCards?.cards) {
+          this.countResources(state.resourceCards.cards);
+        }
+      }
     }
   };
 
@@ -823,6 +877,78 @@
     },
     
     /**
+     * Suggest best road placement after placing a settlement
+     */
+    suggestRoadPlacement() {
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      console.log(`${LOG_PREFIX} 🛤️ ROAD PLACEMENT SUGGESTION`);
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      
+      // Find my settlements/cities
+      const myBuildings = [];
+      for (const [cornerId, corner] of Object.entries(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          myBuildings.push(parseInt(cornerId));
+        }
+      }
+      
+      if (myBuildings.length === 0) {
+        console.log(`${LOG_PREFIX}   No buildings found yet`);
+        return [];
+      }
+      
+      // Find edges adjacent to my buildings that are not yet built
+      const availableRoads = [];
+      
+      for (const cornerId of myBuildings) {
+        const adjacentEdges = GameState.cornerToEdges[cornerId] || [];
+        for (const edgeId of adjacentEdges) {
+          const edge = GameState.edges[edgeId];
+          if (edge && edge.owner === null) {
+            // Score this road based on where it leads
+            const connectedCorners = GameState.edgeToCorners[edgeId] || [];
+            const otherCorner = connectedCorners.find(c => c !== cornerId);
+            
+            if (otherCorner !== undefined) {
+              const cornerScore = this.scoreCorner(otherCorner);
+              if (cornerScore) {
+                availableRoads.push({
+                  edgeId: parseInt(edgeId),
+                  fromCorner: cornerId,
+                  toCorner: otherCorner,
+                  leadsToScore: cornerScore.score,
+                  leadsToTiles: cornerScore.tiles
+                });
+              }
+            }
+          }
+        }
+      }
+      
+      // Sort by destination score
+      availableRoads.sort((a, b) => b.leadsToScore - a.leadsToScore);
+      
+      if (availableRoads.length === 0) {
+        console.log(`${LOG_PREFIX}   No available road spots found`);
+        return [];
+      }
+      
+      console.log(`${LOG_PREFIX} 🏆 BEST ROAD OPTIONS:`);
+      console.log(`${LOG_PREFIX} `);
+      
+      for (let i = 0; i < Math.min(3, availableRoads.length); i++) {
+        const r = availableRoads[i];
+        console.log(`${LOG_PREFIX}   ${i + 1}. Edge ${r.edgeId} (Corner ${r.fromCorner} → ${r.toCorner})`);
+        console.log(`${LOG_PREFIX}      Leads to: ${r.leadsToTiles.join(', ')} (Score: ${r.leadsToScore})`);
+        console.log(`${LOG_PREFIX} `);
+      }
+      
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      
+      return availableRoads.slice(0, 3);
+    },
+    
+    /**
      * Suggest what to build based on current resources
      */
     suggestBuildPriority() {
@@ -947,28 +1073,21 @@
 
   function handleWebSocketMessage(payload) {
     const { direction, type, data, size } = payload;
-    const icon = direction === 'incoming' ? '⬇️' : '⬆️';
-
-    // Log all incoming messages over 100 bytes (likely game data)
-    if (direction === 'incoming' && size > 100) {
-      console.log(`${LOG_PREFIX} ${icon} Large message: ${size} bytes`);
-    }
 
     if (type === 'binary') {
       const uint8Array = new Uint8Array(data);
       const decoded = MessagePackDecoder.decode(uint8Array);
       if (decoded) {
         MessageParser.parse(decoded);
-      } else {
+      } else if (DEBUG) {
         console.error(`${LOG_PREFIX} ❌ Failed to decode MessagePack, size: ${size}`);
       }
     } else if (type === 'text') {
-      console.log(`${LOG_PREFIX} ${icon} Text message: ${data.substring(0, 200)}`);
       try {
         const parsed = JSON.parse(data);
         MessageParser.parse(parsed);
       } catch (e) {
-        console.log(`${LOG_PREFIX} 📝 Text (not JSON):`, data.substring(0, 100));
+        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Text (not JSON):`, data.substring(0, 100));
       }
     }
   }
@@ -1020,6 +1139,7 @@
       state: GameState,
       analyze: () => Advisor.analyze(),
       suggestPlacement: () => Advisor.suggestInitialPlacement(),
+      suggestRoad: () => Advisor.suggestRoadPlacement(),
       suggestBuild: () => Advisor.suggestBuildPriority(),
       scoreCorner: (id) => Advisor.scoreCorner(id),
       getMessages: () => GameState.messageLog,
@@ -1027,11 +1147,6 @@
       debug: { MessageParser, BoardBuilder, Advisor }
     };
 
-    console.log(`${LOG_PREFIX} ✅ Ready! Commands:`);
-    console.log(`${LOG_PREFIX}    colonistAdvisor.analyze()        - Full game analysis`);
-    console.log(`${LOG_PREFIX}    colonistAdvisor.suggestPlacement() - Best settlement spots`);
-    console.log(`${LOG_PREFIX}    colonistAdvisor.suggestBuild()     - What to build next`);
-    console.log(`${LOG_PREFIX}    colonistAdvisor.state             - Raw game state`);
   }
 
   if (document.readyState === 'loading') {
