@@ -473,7 +473,7 @@
         
         // Type 4 = Full game state  
         if (data?.type === 4 && data?.payload) {
-          console.log(`${LOG_PREFIX} 🎮 GAME STARTED (via ID 130)`);
+          console.log(`${LOG_PREFIX} 🎮 GAME STARTED`);
           this.parseFullGameState(data.payload);
           return { isGameStart: true };
         }
@@ -619,9 +619,12 @@
         console.log(`${LOG_PREFIX} 📊 Diff update:`, diff);
       }
       
+      // Map state contains corner and edge updates
+      const mapState = diff.mapState || {};
+      
       // Corner updates (settlements/cities placed)
-      if (diff.tileCornerStates) {
-        for (const [cornerId, state] of Object.entries(diff.tileCornerStates)) {
+      if (mapState.tileCornerStates) {
+        for (const [cornerId, state] of Object.entries(mapState.tileCornerStates)) {
           // Initialize corner if it doesn't exist
           if (!GameState.corners[cornerId]) {
             GameState.corners[cornerId] = { owner: null, buildingType: null };
@@ -637,11 +640,13 @@
       }
       
       // Edge updates (roads placed)
-      if (diff.tileEdgeStates) {
-        for (const [edgeId, state] of Object.entries(diff.tileEdgeStates)) {
-          if (GameState.edges[edgeId]) {
-            Object.assign(GameState.edges[edgeId], state);
+      if (mapState.tileEdgeStates) {
+        for (const [edgeId, state] of Object.entries(mapState.tileEdgeStates)) {
+          // Initialize edge if it doesn't exist
+          if (!GameState.edges[edgeId]) {
+            GameState.edges[edgeId] = { owner: null };
           }
+          Object.assign(GameState.edges[edgeId], state);
           
           if (state.owner !== undefined) {
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
