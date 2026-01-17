@@ -635,6 +635,11 @@
             const building = state.buildingType === 1 ? 'Settlement' : 'City';
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
             console.log(`${LOG_PREFIX} 🏗️ ${playerName} built ${building} at corner ${cornerId}`);
+            
+            // If I just placed a settlement during setup, suggest roads
+            if (state.owner === GameState.myColor && state.buildingType === 1 && GameState.isSetupPhase) {
+              setTimeout(() => Advisor.suggestRoadPlacement(), 150);
+            }
           }
         }
       }
@@ -707,6 +712,7 @@
     parseCurrentStateUpdate(currentState) {
       const { actionState, currentTurnPlayerColor, completedTurns } = currentState;
       const prevAction = GameState.currentAction;
+      const prevTurn = GameState.currentTurnColor;
       
       if (actionState !== undefined) {
         GameState.currentAction = ACTION_STATES[actionState] || actionState;
@@ -721,14 +727,22 @@
       }
       
       // Log turn changes
-      if (currentTurnPlayerColor !== undefined) {
+      if (currentTurnPlayerColor !== undefined && currentTurnPlayerColor !== prevTurn) {
         const playerName = GameState.players[currentTurnPlayerColor]?.username || PLAYER_COLORS[currentTurnPlayerColor];
         const isMyTurn = currentTurnPlayerColor === GameState.myColor;
         console.log(`${LOG_PREFIX} 🎯 ${isMyTurn ? '>>> YOUR TURN <<<' : `${playerName}'s turn`} - Action: ${GameState.currentAction}`);
       }
       
-      // Suggest actions when it's our turn
-      if (GameState.currentTurnColor === GameState.myColor) {
+      // Log action changes (when turn doesn't change but action does)
+      if (actionState !== undefined && GameState.currentAction !== prevAction) {
+        console.log(`${LOG_PREFIX} 🎮 Action changed: ${prevAction} → ${GameState.currentAction}`);
+      }
+      
+      // Suggest actions when it's our turn and action changed
+      const actionChanged = GameState.currentAction !== prevAction;
+      const turnChanged = currentTurnPlayerColor !== undefined;
+      
+      if (GameState.currentTurnColor === GameState.myColor && (actionChanged || turnChanged)) {
         setTimeout(() => {
           if (GameState.currentAction === 'place_settlement') {
             Advisor.suggestInitialPlacement();
@@ -1182,7 +1196,18 @@
       scoreCorner: (id) => Advisor.scoreCorner(id),
       getMessages: () => GameState.messageLog,
       reset: () => GameState.reset(),
-      debug: { MessageParser, BoardBuilder, Advisor }
+      debug: { MessageParser, BoardBuilder, Advisor },
+      // Debug: check corner adjacency
+      checkCorner: (id) => {
+        const corner = GameState.corners[id];
+        const neighbors = GameState.cornerToCorners[id] || [];
+        const tiles = GameState.cornerToTiles[id] || [];
+        console.log(`Corner ${id}:`, corner);
+        console.log(`  Neighbors:`, neighbors);
+        console.log(`  Neighbor owners:`, neighbors.map(n => ({id: n, owner: GameState.corners[n]?.owner})));
+        console.log(`  Tiles:`, tiles.map(t => GameState.tiles[t]));
+        return { corner, neighbors, tiles };
+      }
     };
 
   }
