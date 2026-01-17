@@ -402,10 +402,8 @@
           data: decoded
         });
         
-        // Debug: log that we received a non-heartbeat message
-        if (decoded.type === undefined && decoded.id === undefined) {
-          console.log(`${LOG_PREFIX} 📥 Unknown structure, keys:`, Object.keys(decoded), 'preview:', JSON.stringify(decoded).substring(0, 300));
-        } else {
+        // Debug logging (only in debug mode)
+        if (DEBUG) {
           console.log(`${LOG_PREFIX} 📥 Received - type: ${decoded.type}, id: ${decoded.id}`);
         }
       }
@@ -424,8 +422,10 @@
     handleTypedMessage(msg) {
       const { type, payload, sequence } = msg;
       
-      // Log all typed messages for debugging
-      console.log(`${LOG_PREFIX} 📨 Type ${type} message, payload keys:`, payload ? Object.keys(payload) : 'none');
+      // Debug logging
+      if (DEBUG) {
+        console.log(`${LOG_PREFIX} 📨 Type ${type} message, payload keys:`, payload ? Object.keys(payload) : 'none');
+      }
       
       // Type 4 = Full game state (game started)
       if (type === 4) {
@@ -463,31 +463,25 @@
         return { isHeartbeat: true };
       }
       
-      // Log ID 130 messages to understand structure
+      // ID 130 messages contain game updates wrapped with type/payload
       if (id === 130 || id === '130') {
-        console.log(`${LOG_PREFIX} 📦 ID 130 data structure:`, JSON.stringify(data).substring(0, 500));
-        
-        // Try various structures
-        if (data?.type === 'payload' && data?.payload?.diff) {
-          console.log(`${LOG_PREFIX} 📊 Found diff in data.payload.diff`);
+        // Type 91 = Game state diff (most common)
+        if (data?.type === 91 && data?.payload?.diff) {
           this.parseDiffUpdate(data.payload.diff);
           return { isGameUpdate: true };
         }
         
-        // Maybe diff is directly in data?
-        if (data?.diff) {
-          console.log(`${LOG_PREFIX} 📊 Found diff directly in data.diff`);
-          this.parseDiffUpdate(data.diff);
-          return { isGameUpdate: true };
+        // Type 4 = Full game state  
+        if (data?.type === 4 && data?.payload) {
+          console.log(`${LOG_PREFIX} 🎮 GAME STARTED (via ID 130)`);
+          this.parseFullGameState(data.payload);
+          return { isGameStart: true };
         }
         
-        // Maybe it has type and payload at data level?
-        if (data?.type && data?.payload) {
-          console.log(`${LOG_PREFIX} 📊 Found type ${data.type} with payload`);
-          if (data.payload.diff) {
-            this.parseDiffUpdate(data.payload.diff);
-            return { isGameUpdate: true };
-          }
+        // Other types with payload.diff
+        if (data?.payload?.diff) {
+          this.parseDiffUpdate(data.payload.diff);
+          return { isGameUpdate: true };
         }
       }
       
@@ -628,9 +622,11 @@
       // Corner updates (settlements/cities placed)
       if (diff.tileCornerStates) {
         for (const [cornerId, state] of Object.entries(diff.tileCornerStates)) {
-          if (GameState.corners[cornerId]) {
-            Object.assign(GameState.corners[cornerId], state);
+          // Initialize corner if it doesn't exist
+          if (!GameState.corners[cornerId]) {
+            GameState.corners[cornerId] = { owner: null, buildingType: null };
           }
+          Object.assign(GameState.corners[cornerId], state);
           
           if (state.owner !== undefined && state.buildingType !== undefined) {
             const building = state.buildingType === 1 ? 'Settlement' : 'City';
@@ -780,13 +776,14 @@
       const corner = GameState.corners[cornerId];
       if (!corner) return null;
       
-      // Skip if already occupied
-      if (corner.owner !== null) return null;
+      // Skip if already occupied (owner is set and not null/undefined)
+      if (corner.owner !== null && corner.owner !== undefined) return null;
       
       // Skip if adjacent corner is occupied (distance rule)
       const neighbors = GameState.cornerToCorners[cornerId] || [];
       for (const neighborId of neighbors) {
-        if (GameState.corners[neighborId]?.owner !== null) {
+        const neighborOwner = GameState.corners[neighborId]?.owner;
+        if (neighborOwner !== null && neighborOwner !== undefined) {
           return null;
         }
       }
@@ -1105,8 +1102,8 @@
   function handleWebSocketMessage(payload) {
     const { direction, type, data, size } = payload;
 
-    // Debug: log all incoming messages over 40 bytes
-    if (direction === 'incoming' && size > 40) {
+    // Debug: log incoming messages
+    if (DEBUG && direction === 'incoming' && size > 40) {
       console.log(`${LOG_PREFIX} 📡 WS incoming: ${size} bytes (${type})`);
     }
 
