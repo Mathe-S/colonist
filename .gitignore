@@ -1,0 +1,22 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Build artifacts
+node_modules/
+dist/
+build/
+
+# Extension packed files
+*.crx
+*.pem
+*.zip

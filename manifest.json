@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Colonist.io Advisor",
+  "version": "1.0.0",
+  "description": "Intercepts game state and suggests optimal decisions for 1v1 Colonist.io",
+  "permissions": [
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://colonist.io/*",
+    "https://*.colonist.io/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://colonist.io/*",
+        "https://*.colonist.io/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js", "lib/msgpack.min.js"],
+      "matches": ["https://colonist.io/*", "https://*.colonist.io/*"]
+    }
+  ],
+  "action": {
+    "default_title": "Colonist Advisor"
+  }
+}
