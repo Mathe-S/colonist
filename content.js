@@ -401,6 +401,13 @@
           timestamp: Date.now(),
           data: decoded
         });
+        
+        // Debug: log that we received a non-heartbeat message
+        if (decoded.type === undefined && decoded.id === undefined) {
+          console.log(`${LOG_PREFIX} 📥 Unknown structure, keys:`, Object.keys(decoded), 'preview:', JSON.stringify(decoded).substring(0, 300));
+        } else {
+          console.log(`${LOG_PREFIX} 📥 Received - type: ${decoded.type}, id: ${decoded.id}`);
+        }
       }
 
       // Handle different message types
@@ -417,6 +424,9 @@
     handleTypedMessage(msg) {
       const { type, payload, sequence } = msg;
       
+      // Log all typed messages for debugging
+      console.log(`${LOG_PREFIX} 📨 Type ${type} message, payload keys:`, payload ? Object.keys(payload) : 'none');
+      
       // Type 4 = Full game state (game started)
       if (type === 4) {
         if (payload) {
@@ -429,6 +439,7 @@
       
       // Type 91 and others = Game state diff updates
       if (payload?.diff) {
+        console.log(`${LOG_PREFIX} 📊 Processing diff with keys:`, Object.keys(payload.diff));
         this.parseDiffUpdate(payload.diff);
         return { isGameUpdate: true };
       }
@@ -452,19 +463,39 @@
         return { isHeartbeat: true };
       }
       
+      // Log ID 130 messages to understand structure
+      if (id === 130 || id === '130') {
+        console.log(`${LOG_PREFIX} 📦 ID 130 data structure:`, JSON.stringify(data).substring(0, 500));
+        
+        // Try various structures
+        if (data?.type === 'payload' && data?.payload?.diff) {
+          console.log(`${LOG_PREFIX} 📊 Found diff in data.payload.diff`);
+          this.parseDiffUpdate(data.payload.diff);
+          return { isGameUpdate: true };
+        }
+        
+        // Maybe diff is directly in data?
+        if (data?.diff) {
+          console.log(`${LOG_PREFIX} 📊 Found diff directly in data.diff`);
+          this.parseDiffUpdate(data.diff);
+          return { isGameUpdate: true };
+        }
+        
+        // Maybe it has type and payload at data level?
+        if (data?.type && data?.payload) {
+          console.log(`${LOG_PREFIX} 📊 Found type ${data.type} with payload`);
+          if (data.payload.diff) {
+            this.parseDiffUpdate(data.payload.diff);
+            return { isGameUpdate: true };
+          }
+        }
+      }
+      
       // Check if data contains type 4 (game start might be wrapped)
       if (data?.type === 4 && data?.payload) {
         console.log(`${LOG_PREFIX} 🎮 GAME STARTED - Parsing full state...`);
         this.parseFullGameState(data.payload);
         return { isGameStart: true };
-      }
-      
-      // ID 130 = Game state diff
-      if (id === 130 || id === '130') {
-        if (data?.type === 'payload' && data?.payload?.diff) {
-          this.parseDiffUpdate(data.payload.diff);
-          return { isGameUpdate: true };
-        }
       }
       
       return {};
@@ -1074,12 +1105,17 @@
   function handleWebSocketMessage(payload) {
     const { direction, type, data, size } = payload;
 
+    // Debug: log all incoming messages over 40 bytes
+    if (direction === 'incoming' && size > 40) {
+      console.log(`${LOG_PREFIX} 📡 WS incoming: ${size} bytes (${type})`);
+    }
+
     if (type === 'binary') {
       const uint8Array = new Uint8Array(data);
       const decoded = MessagePackDecoder.decode(uint8Array);
       if (decoded) {
         MessageParser.parse(decoded);
-      } else if (DEBUG) {
+      } else {
         console.error(`${LOG_PREFIX} ❌ Failed to decode MessagePack, size: ${size}`);
       }
     } else if (type === 'text') {
@@ -1087,7 +1123,7 @@
         const parsed = JSON.parse(data);
         MessageParser.parse(parsed);
       } catch (e) {
-        if (DEBUG) console.log(`${LOG_PREFIX} 📝 Text (not JSON):`, data.substring(0, 100));
+        console.log(`${LOG_PREFIX} 📝 Text (not JSON):`, data.substring(0, 100));
       }
     }
   }
