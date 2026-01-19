@@ -60,6 +60,16 @@
     devCard: { sheep: 1, wheat: 1, ore: 1 }
   };
 
+  // Development card types
+  const DEV_CARD_TYPES = {
+    0: 'knight',
+    1: 'victoryPoint',
+    2: 'roadBuilding',
+    3: 'yearOfPlenty',
+    4: 'monopoly',
+    10: 'unknown'  // Hidden cards in deck
+  };
+
   const PLAYER_COLORS = {
     1: 'red',
     2: 'blue',
@@ -382,6 +392,11 @@
         </div>
       `;
       
+      // Strategic recommendation (main action to take)
+      if (isMyTurn && !GameState.isSetupPhase) {
+        html += this.renderStrategicRecommendation();
+      }
+      
       // Build options
       html += this.renderBuildOptions();
       
@@ -400,7 +415,116 @@
         }
       }
       
+      // Opponent tracking
+      html += this.renderOpponentTracking();
+      
       body.innerHTML = html;
+    },
+    
+    renderStrategicRecommendation() {
+      try {
+        const strategy = Advisor.getStrategicRecommendation();
+        if (!strategy || !strategy.recommendation) return '';
+        
+        const rec = strategy.recommendation;
+        const ctx = strategy.context;
+        const isUrgent = rec.priority >= 90;
+        
+        return `
+          <div class="ca-section">
+            <div class="ca-section-title">🎯 What Should I Do?</div>
+            <div class="ca-suggestion ${isUrgent ? 'top' : ''}" style="border-left-color: ${isUrgent ? '#ff5722' : '#4caf50'}">
+              <div class="ca-suggestion-header">
+                <span class="ca-suggestion-title">${rec.action}</span>
+                <span class="ca-suggestion-score" style="background: ${isUrgent ? '#ff5722' : '#4caf50'}">${rec.priority}</span>
+              </div>
+              <div class="ca-suggestion-detail">${rec.reason}</div>
+            </div>
+            ${strategy.alternatives.length > 0 ? `
+              <div style="font-size: 10px; color: #666; margin-top: 6px;">
+                Also consider: ${strategy.alternatives.map(a => a.action.split(' ')[1]).join(', ')}
+              </div>
+            ` : ''}
+            <div style="font-size: 10px; color: #888; margin-top: 4px;">
+              VP: ${ctx.myVP} | Phase: ${ctx.phase} | Cards: ${ctx.totalCards}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        return '';
+      }
+    },
+
+    renderOpponentTracking() {
+      const opponents = Object.entries(GameState.opponentResources)
+        .filter(([color]) => parseInt(color) !== GameState.myColor);
+      
+      if (opponents.length === 0) return '';
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">👁️ Opponent Cards (Estimated)</div>`;
+      
+      for (const [color, res] of opponents) {
+        const player = GameState.players[color];
+        if (!player) continue;
+        
+        const colorName = PLAYER_COLORS[color] || 'unknown';
+        const vp = player.victoryPoints || 0;
+        const total = res.total || 0;
+        const devCards = GameState.playerDevCards[color]?.total || 0;
+        const knightsPlayed = GameState.playerDevCards[color]?.knightsPlayed || 0;
+        
+        // Build resource string
+        const resources = [];
+        if (res.wood > 0) resources.push(`🪵${res.wood}`);
+        if (res.brick > 0) resources.push(`🧱${res.brick}`);
+        if (res.sheep > 0) resources.push(`🐑${res.sheep}`);
+        if (res.wheat > 0) resources.push(`🌾${res.wheat}`);
+        if (res.ore > 0) resources.push(`�ite${res.ore}`);
+        
+        const resourceStr = resources.length > 0 ? resources.join(' ') : 'Unknown';
+        const vpWarning = vp >= 8 ? ' ⚠️' : '';
+        
+        html += `
+          <div style="background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid ${this.getColorCode(colorName)}">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="font-weight: 600; color: ${this.getColorCode(colorName)}">${player.username}</span>
+              <span style="color: #888; font-size: 11px;">${vp} VP${vpWarning}</span>
+            </div>
+            <div style="font-size: 11px; color: #aaa;">
+              Cards: ~${total} | ${resourceStr}
+            </div>
+            ${devCards > 0 || knightsPlayed > 0 ? `
+              <div style="font-size: 10px; color: #888; margin-top: 2px;">
+                🃏 ${devCards} held | ⚔️ ${knightsPlayed} knights
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+      
+      // Largest Army info
+      if (GameState.largestArmyOwner) {
+        const owner = GameState.players[GameState.largestArmyOwner];
+        const ownerName = owner?.username || 'Unknown';
+        html += `
+          <div style="font-size: 10px; color: #e94560; margin-top: 4px;">
+            ⚔️ Largest Army: ${ownerName} (${GameState.largestArmySize} knights)
+          </div>
+        `;
+      }
+      
+      html += '</div>';
+      return html;
+    },
+    
+    getColorCode(colorName) {
+      const colors = {
+        red: '#e74c3c',
+        blue: '#3498db',
+        orange: '#e67e22',
+        white: '#ecf0f1'
+      };
+      return colors[colorName] || '#888';
     },
 
     renderBuildOptions() {
@@ -747,10 +871,19 @@
     
     // My resources (only visible to me)
     myResources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
-    myDevCards: [],
+    myDevCards: [],            // Array of card types I hold
+    myPlayedDevCards: [],      // Dev cards I've played
+    
+    // Development cards tracking per player
+    playerDevCards: {},        // color -> { total: n, knights: n, unknown: n }
+    largestArmyOwner: null,    // color of player with largest army
+    largestArmySize: 0,        // how many knights
     
     // Opponent resource tracking (probability-based)
-    opponentResources: {},     // color -> { wood: estimate, ... }
+    opponentResources: {},     // color -> { wood: 0, brick: 0, ... , total: 0 }
+    
+    // Victory points tracking
+    playerVP: {},              // color -> { settlements: n, cities: n, longestRoad: bool, largestArmy: bool, devCards: n }
     
     // Tracking
     diceHistory: [],
@@ -779,7 +912,12 @@
       this.availableRobberSpots = [];
       this.myResources = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
       this.myDevCards = [];
+      this.myPlayedDevCards = [];
+      this.playerDevCards = {};
+      this.largestArmyOwner = null;
+      this.largestArmySize = 0;
       this.opponentResources = {};
+      this.playerVP = {};
       this.diceHistory = [];
       this.messageLog = [];
     }
@@ -1109,20 +1247,39 @@
         const resourceMap = { 1: 'wood', 2: 'sheep', 3: 'ore', 4: 'wheat', 5: 'brick' };
         const resource = resourceMap[card];
         
-        if (owner === GameState.myColor) {
-          // Update my resources (we get exact info from diffs, but this confirms)
-          if (resource && GameState.myResources[resource] !== undefined) {
-            // Already tracked via diff, skip
-          }
-        } else {
+        if (owner !== GameState.myColor) {
           // Track opponent resources (estimate)
           if (!GameState.opponentResources[owner]) {
-            GameState.opponentResources[owner] = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
+            GameState.opponentResources[owner] = { 
+              wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0, 
+              total: 0,
+              lastUpdated: Date.now()
+            };
           }
           if (resource) {
             GameState.opponentResources[owner][resource]++;
+            GameState.opponentResources[owner].total++;
+            GameState.opponentResources[owner].lastUpdated = Date.now();
           }
         }
+      }
+      
+      // Update UI with new opponent info
+      AdvisorUI.update();
+    },
+    
+    /**
+     * Track when opponent spends resources (building, buying dev cards)
+     */
+    trackOpponentSpend(playerColor, cost) {
+      if (playerColor === GameState.myColor) return;
+      
+      const opp = GameState.opponentResources[playerColor];
+      if (!opp) return;
+      
+      for (const [resource, amount] of Object.entries(cost)) {
+        opp[resource] = Math.max(0, (opp[resource] || 0) - amount);
+        opp.total = Math.max(0, (opp.total || 0) - amount);
       }
     },
     
@@ -1246,6 +1403,55 @@
           }
         }
       }
+      
+      // Development cards state
+      if (gs.mechanicDevelopmentCardsState) {
+        const devState = gs.mechanicDevelopmentCardsState;
+        
+        // Parse player dev cards
+        if (devState.players) {
+          for (const [colorId, pState] of Object.entries(devState.players)) {
+            const color = parseInt(colorId);
+            
+            // Initialize tracking
+            if (!GameState.playerDevCards[color]) {
+              GameState.playerDevCards[color] = { total: 0, knights: 0, knightsPlayed: 0 };
+            }
+            
+            // Count cards held
+            if (pState.developmentCards?.cards) {
+              const cards = pState.developmentCards.cards;
+              GameState.playerDevCards[color].total = cards.length;
+              
+              // For myself, track actual card types
+              if (color === GameState.myColor) {
+                GameState.myDevCards = cards.map(c => DEV_CARD_TYPES[c] || 'unknown');
+              }
+            }
+            
+            // Track played cards (knights for largest army)
+            if (pState.developmentCardsUsed) {
+              const knightsPlayed = pState.developmentCardsUsed.filter(c => c === 0).length;
+              GameState.playerDevCards[color].knightsPlayed = knightsPlayed;
+              
+              // Check for largest army (3+ knights)
+              if (knightsPlayed >= 3 && knightsPlayed > GameState.largestArmySize) {
+                GameState.largestArmyOwner = color;
+                GameState.largestArmySize = knightsPlayed;
+              }
+            }
+          }
+        }
+      }
+      
+      // Largest army state
+      if (gs.mechanicLargestArmyState) {
+        for (const [colorId, state] of Object.entries(gs.mechanicLargestArmyState)) {
+          if (state.hasLargestArmy) {
+            GameState.largestArmyOwner = parseInt(colorId);
+          }
+        }
+      }
     },
     
     parseDiffUpdate(diff) {
@@ -1270,6 +1476,15 @@
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
             console.log(`${LOG_PREFIX} 🏗️ ${playerName} built ${building} at corner ${cornerId}`);
             
+            // Track opponent spending
+            if (state.owner !== GameState.myColor && !GameState.isSetupPhase) {
+              if (state.buildingType === 1) {
+                this.trackOpponentSpend(state.owner, BUILD_COSTS.settlement);
+              } else if (state.buildingType === 2) {
+                this.trackOpponentSpend(state.owner, BUILD_COSTS.city);
+              }
+            }
+            
             // If I just placed a settlement during setup, suggest roads
             if (state.owner === GameState.myColor && state.buildingType === 1 && GameState.isSetupPhase) {
               setTimeout(() => Advisor.suggestRoadPlacement(), 150);
@@ -1290,6 +1505,11 @@
           if (state.owner !== undefined) {
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
             console.log(`${LOG_PREFIX} 🛤️ ${playerName} built Road at edge ${edgeId}`);
+            
+            // Track opponent spending
+            if (state.owner !== GameState.myColor && !GameState.isSetupPhase) {
+              this.trackOpponentSpend(state.owner, BUILD_COSTS.road);
+            }
           }
         }
       }
@@ -1981,6 +2201,197 @@
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
       return suggestions;
+    },
+    
+    /**
+     * Get comprehensive strategic recommendation
+     * Returns the single best action to take right now
+     */
+    getStrategicRecommendation() {
+      const r = GameState.myResources;
+      const totalCards = r.wood + r.brick + r.sheep + r.wheat + r.ore;
+      const options = [];
+      
+      // Count my buildings
+      let mySettlements = 0;
+      let myCities = 0;
+      let myRoads = 0;
+      
+      for (const corner of Object.values(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          if (corner.buildingType === 1) mySettlements++;
+          if (corner.buildingType === 2) myCities++;
+        }
+      }
+      for (const edge of Object.values(GameState.edges)) {
+        if (edge.owner === GameState.myColor) myRoads++;
+      }
+      
+      // Calculate my VP
+      const myVP = mySettlements + (myCities * 2) + 
+        (GameState.largestArmyOwner === GameState.myColor ? 2 : 0);
+      
+      // Game phase detection
+      const isEarlyGame = GameState.completedTurns < 10;
+      const isMidGame = GameState.completedTurns >= 10 && myVP < 7;
+      const isLateGame = myVP >= 7;
+      
+      // Dev card analysis
+      const myKnights = GameState.myDevCards.filter(c => c === 'knight').length;
+      const knightsPlayed = GameState.playerDevCards[GameState.myColor]?.knightsPlayed || 0;
+      const totalKnights = myKnights + knightsPlayed;
+      const needLargestArmy = !GameState.largestArmyOwner || 
+        GameState.largestArmyOwner !== GameState.myColor;
+      
+      // === EVALUATE OPTIONS ===
+      
+      // 1. CITY - Always high value
+      if (this.canAfford('city') && (GameState.availableCities.length > 0 || mySettlements > 0)) {
+        options.push({
+          action: '🏰 Build City',
+          priority: 95,
+          reason: 'Doubles production, +1 VP. Best value!',
+          category: 'build'
+        });
+      }
+      
+      // 2. SETTLEMENT - Good for expansion
+      if (this.canAfford('settlement')) {
+        const hasSpots = GameState.availableSettlements.length > 0 || 
+          this.calculateAvailableSettlements().length > 0;
+        if (hasSpots) {
+          const bestSpot = this.getBestSettlementSpot();
+          let priority = isEarlyGame ? 85 : 75;
+          
+          options.push({
+            action: '🏠 Build Settlement',
+            priority,
+            reason: `+1 VP, access new resources${bestSpot ? ` (Corner ${bestSpot.cornerId})` : ''}`,
+            category: 'build',
+            where: bestSpot?.cornerId
+          });
+        }
+      }
+      
+      // 3. DEV CARD - Context dependent
+      if (this.canAfford('devCard')) {
+        let priority = 50;
+        let reason = 'Could be VP card or useful knight';
+        
+        // Higher priority if close to largest army
+        if (needLargestArmy && totalKnights >= 1) {
+          priority = 70;
+          reason = `${totalKnights} knights - push for Largest Army (2 VP)!`;
+        }
+        
+        // Higher priority in late game (VP cards)
+        if (isLateGame) {
+          priority = Math.max(priority, 65);
+          reason = 'Late game - VP cards could win!';
+        }
+        
+        // URGENT: Too many cards, spend before 7!
+        if (totalCards >= 7) {
+          priority = 98;
+          reason = '⚠️ 7+ cards! Buy before rolling 7!';
+        }
+        
+        options.push({
+          action: '🃏 Buy Dev Card',
+          priority,
+          reason,
+          category: 'build'
+        });
+      }
+      
+      // 4. ROAD - Lower priority unless needed
+      if (this.canAfford('road')) {
+        const hasSpots = GameState.availableRoads.length > 0 || 
+          this.calculateAvailableRoads().length > 0;
+        if (hasSpots) {
+          let priority = 30;
+          let reason = 'Expand road network';
+          
+          // Higher if no settlement spots
+          if (GameState.availableSettlements.length === 0) {
+            priority = 65;
+            reason = 'Need roads to reach new settlement spots!';
+          }
+          
+          // Check longest road potential
+          // TODO: calculate actual longest road
+          
+          options.push({
+            action: '🛤️ Build Road',
+            priority,
+            reason,
+            category: 'build'
+          });
+        }
+      }
+      
+      // 5. WAIT / SAVE - If nothing urgent
+      if (options.length === 0 || (options.length > 0 && options[0].priority < 50)) {
+        const closest = this.getClosestBuild(r);
+        options.push({
+          action: '⏳ Wait / Collect',
+          priority: 20,
+          reason: closest ? `Save for ${closest.item} (need ${closest.missing.join(', ')})` : 'Collect more resources',
+          category: 'wait'
+        });
+      }
+      
+      // Sort by priority
+      options.sort((a, b) => b.priority - a.priority);
+      
+      return {
+        recommendation: options[0],
+        alternatives: options.slice(1, 4),
+        context: {
+          myVP,
+          totalCards,
+          phase: isEarlyGame ? 'early' : (isMidGame ? 'mid' : 'late'),
+          settlements: mySettlements,
+          cities: myCities,
+          knightsTotal: totalKnights,
+          largestArmyOwner: GameState.largestArmyOwner
+        }
+      };
+    },
+    
+    /**
+     * Get what we're closest to building
+     */
+    getClosestBuild(r) {
+      const builds = [
+        { item: 'Road', cost: BUILD_COSTS.road },
+        { item: 'Settlement', cost: BUILD_COSTS.settlement },
+        { item: 'Dev Card', cost: BUILD_COSTS.devCard },
+        { item: 'City', cost: BUILD_COSTS.city }
+      ];
+      
+      let closest = null;
+      let minMissing = 999;
+      
+      for (const build of builds) {
+        const missing = [];
+        let missingCount = 0;
+        
+        for (const [resource, needed] of Object.entries(build.cost)) {
+          const have = r[resource] || 0;
+          if (have < needed) {
+            missing.push(resource);
+            missingCount += (needed - have);
+          }
+        }
+        
+        if (missingCount > 0 && missingCount < minMissing) {
+          minMissing = missingCount;
+          closest = { item: build.item, missing };
+        }
+      }
+      
+      return closest;
     },
     
     /**
