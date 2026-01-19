@@ -18,6 +18,9 @@
   // Track all active WebSocket connections
   const activeConnections = new Map();
   let connectionId = 0;
+  
+  // Store raw messages for analysis
+  const rawMessageLog = [];
 
   /**
    * Custom WebSocket wrapper that intercepts all messages
@@ -32,7 +35,9 @@
       
       activeConnections.set(this._id, this);
       
-      console.log(`${LOG_PREFIX} WebSocket #${this._id} connecting to: ${url}`);
+      console.log(`${LOG_PREFIX} 🔌 WebSocket #${this._id} connecting to: ${url}`);
+      console.log(`${LOG_PREFIX}    Protocols: ${protocols || 'none'}`);
+      console.log(`${LOG_PREFIX}    Origin: ${window.location.href}`);
       
       // Forward connection info to content script
       this._postMessage('ws_connect', {
@@ -80,11 +85,28 @@
         // Binary data - likely MessagePack encoded
         event.data.arrayBuffer().then((buffer) => {
           const uint8Array = new Uint8Array(buffer);
+          const bytesArray = Array.from(uint8Array);
+          
+          // Store raw data for analysis
+          const firstBytes = bytesArray.slice(0, 30).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          rawMessageLog.push({
+            timestamp,
+            direction: 'incoming',
+            size: buffer.byteLength,
+            firstBytes,
+            allBytes: bytesArray
+          });
+          
+          // Log for large messages
+          if (buffer.byteLength > 50) {
+            console.log(`${LOG_PREFIX} 📦 Incoming ${buffer.byteLength}b: ${firstBytes}...`);
+          }
+          
           this._postMessage('ws_message', {
             id: this._id,
             direction: 'incoming',
             type: 'binary',
-            data: Array.from(uint8Array), // Convert to regular array for postMessage
+            data: bytesArray,
             size: buffer.byteLength,
             timestamp: timestamp
           });
@@ -92,16 +114,40 @@
       } else if (event.data instanceof ArrayBuffer) {
         // ArrayBuffer data
         const uint8Array = new Uint8Array(event.data);
+        const bytesArray = Array.from(uint8Array);
+        
+        // Store raw data
+        const firstBytes = bytesArray.slice(0, 30).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        rawMessageLog.push({
+          timestamp,
+          direction: 'incoming',
+          size: event.data.byteLength,
+          firstBytes,
+          allBytes: bytesArray
+        });
+        
+        if (event.data.byteLength > 50) {
+          console.log(`${LOG_PREFIX} 📦 Incoming ${event.data.byteLength}b: ${firstBytes}...`);
+        }
+        
         this._postMessage('ws_message', {
           id: this._id,
           direction: 'incoming',
           type: 'binary',
-          data: Array.from(uint8Array),
+          data: bytesArray,
           size: event.data.byteLength,
           timestamp: timestamp
         });
       } else {
         // Text data (JSON or other string format)
+        rawMessageLog.push({
+          timestamp,
+          direction: 'incoming',
+          size: event.data.length,
+          text: event.data
+        });
+        
+        console.log(`${LOG_PREFIX} 📝 Incoming text: ${event.data.substring(0, 100)}`);
         this._postMessage('ws_message', {
           id: this._id,
           direction: 'incoming',
@@ -214,27 +260,76 @@
     // Save messages to file
     saveMessages: () => callContentScript('saveMessages'),
     
+    // Save raw WebSocket data for analysis
+    saveRawData: () => {
+      if (rawMessageLog.length === 0) {
+        console.log(`${LOG_PREFIX} No raw messages captured yet`);
+        return;
+      }
+      
+      const data = {
+        exportedAt: new Date().toISOString(),
+        messageCount: rawMessageLog.length,
+        messages: rawMessageLog
+      };
+      
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `colonist-raw-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log(`${LOG_PREFIX} 💾 Saved ${rawMessageLog.length} raw messages`);
+    },
+    
     // Debug
     checkCorner: (id) => callContentScript('checkCorner', id),
     
     // WebSocket info
-    getConnections: () => Array.from(activeConnections.entries()),
-    getConnectionCount: () => activeConnections.size,
+    getConnections: () => {
+      const conns = Array.from(activeConnections.entries()).map(([id, ws]) => ({
+        id,
+        url: ws._url,
+        readyState: ws.readyState,
+        readyStateText: ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState],
+        createdAt: ws._createdAt
+      }));
+      console.log('Active WebSocket connections:', conns);
+      return conns;
+    },
+    getConnectionCount: () => {
+      console.log(`Active connections: ${activeConnections.size}`);
+      return activeConnections.size;
+    },
     
     // Help
     help: () => {
       console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║           COLONIST ADVISOR - COMMANDS                      ║
-╠═══════════════════════════════════════════════════════════╣
-║  colonistAdvisor.analyze()         Full game analysis      ║
-║  colonistAdvisor.suggestPlacement() Best settlement spots  ║
-║  colonistAdvisor.suggestRoad()      Best road options      ║
-║  colonistAdvisor.suggestBuild()     Build priority         ║
-║  colonistAdvisor.saveMessages()     Download all messages  ║
-║  colonistAdvisor.checkCorner(id)    Debug corner info      ║
-║  colonistAdvisor.help()             Show this help         ║
-╚═══════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════╗
+║            COLONIST ADVISOR - COMMANDS                     ║
+╠════════════════════════════════════════════════════════════╣
+║  SUGGESTIONS:                                              ║
+║    colonistAdvisor.analyze()          Full game analysis   ║
+║    colonistAdvisor.suggestPlacement() Best settlement spots║
+║    colonistAdvisor.suggestRoad()      Best road options    ║
+║    colonistAdvisor.suggestBuild()     Build priority       ║
+╠════════════════════════════════════════════════════════════╣
+║  DATA:                                                     ║
+║    colonistAdvisor.saveMessages()     Download all messages║
+║    colonistAdvisor.saveRawData()      Download RAW bytes   ║
+║    colonistAdvisor.getMessages()      View message log     ║
+║    colonistAdvisor.getState()         View game state      ║
+╠════════════════════════════════════════════════════════════╣
+║  DEBUG:                                                    ║
+║    colonistAdvisor.getConnections()   Show WebSocket info  ║
+║    colonistAdvisor.checkCorner(id)    Debug corner info    ║
+║    colonistAdvisor.help()             Show this help       ║
+╚════════════════════════════════════════════════════════════╝
       `);
     },
     
