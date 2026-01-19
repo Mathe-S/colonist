@@ -448,6 +448,12 @@
       
       // Current action suggestions
       const action = GameState.currentAction;
+      
+      // Show suggestions if it's our turn OR if we have available spots (server sends before turn change)
+      const hasSettlementSpots = GameState.availableSettlements.length > 0;
+      const hasRoadSpots = GameState.availableRoads.length > 0;
+      const hasRobberSpots = GameState.availableRobberSpots.length > 0;
+      
       if (isMyTurn) {
         if (action === 'place_settlement' || action === 1) {
           html += this.renderSettlementSuggestions();
@@ -458,6 +464,18 @@
         } else if (action === 'main_turn' || action === 7 || action === 0) {
           html += this.renderSettlementSuggestions();
           html += this.renderRoadSuggestions();
+        }
+      } else {
+        // Show suggestions even when waiting if server sent us available spots
+        // (Server sends spots BEFORE turn officially changes)
+        if (hasSettlementSpots && GameState.isSetupPhase) {
+          html += this.renderSettlementSuggestions();
+        }
+        if (hasRoadSpots && GameState.isSetupPhase) {
+          html += this.renderRoadSuggestions();
+        }
+        if (hasRobberSpots) {
+          html += this.renderRobberSuggestions();
         }
       }
       
@@ -1445,30 +1463,22 @@
         }
         
         // Type 30 = Available settlement spots
+        // Server sends these BEFORE turn officially changes to us
         if (msgType === 30 && Array.isArray(payload)) {
           GameState.availableSettlements = payload;
-          if (payload.length > 0 && GameState.currentTurnColor === GameState.myColor) {
-            console.log(`${LOG_PREFIX} 🏠 Available settlements: ${payload.length} spots`);
-            // Auto-suggest if it's our turn to place
-            if (GameState.currentAction === 'place_settlement' || GameState.currentAction === 1) {
-              setTimeout(() => Advisor.suggestInitialPlacement(), 50);
-            }
-            AdvisorUI.update();
-          }
+          console.log(`${LOG_PREFIX} 🏠 Available settlements updated: ${payload.length} spots`);
+          // Always update UI - data is for upcoming turn
+          AdvisorUI.update();
           return { isAvailableSpots: true };
         }
         
         // Type 31 = Available road spots
+        // Server sends these BEFORE turn officially changes to us
         if (msgType === 31 && Array.isArray(payload)) {
           GameState.availableRoads = payload;
-          if (payload.length > 0 && GameState.currentTurnColor === GameState.myColor) {
-            console.log(`${LOG_PREFIX} 🛤️ Available roads: ${payload.length} spots`);
-            // Auto-suggest if it's our turn to place
-            if (GameState.currentAction === 'place_road' || GameState.currentAction === 3) {
-              setTimeout(() => Advisor.suggestRoadPlacement(), 50);
-            }
-            AdvisorUI.update();
-          }
+          console.log(`${LOG_PREFIX} 🛤️ Available roads updated: ${payload.length} spots`);
+          // Always update UI - data is for upcoming turn
+          AdvisorUI.update();
           return { isAvailableSpots: true };
         }
         
@@ -1865,6 +1875,19 @@
         const playerName = GameState.players[currentTurnPlayerColor]?.username || PLAYER_COLORS[currentTurnPlayerColor];
         const isMyTurn = currentTurnPlayerColor === GameState.myColor;
         console.log(`${LOG_PREFIX} 🎯 ${isMyTurn ? '>>> YOUR TURN <<<' : `${playerName}'s turn`} - Action: ${GameState.currentAction}`);
+        
+        // Clear available spots when turn changes to opponent (they get their own spots)
+        if (!isMyTurn) {
+          GameState.availableSettlements = [];
+          GameState.availableRoads = [];
+          GameState.availableCities = [];
+          GameState.availableRobberSpots = [];
+        }
+        
+        // Trigger suggestions when it becomes our turn and we have data
+        if (isMyTurn) {
+          setTimeout(() => AdvisorUI.update(), 50);
+        }
       }
       
       // Log action changes (when turn doesn't change but action does)
