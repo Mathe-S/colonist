@@ -190,10 +190,56 @@
   
   console.log(`${LOG_PREFIX} WebSocket interceptor installed`);
   
-  // Expose debug utilities on window for manual inspection
-  window.__colonistAdvisor = {
+  // Helper to call content script API
+  function callContentScript(action, ...args) {
+    window.postMessage({
+      source: 'colonist-advisor-page-request',
+      action,
+      args
+    }, '*');
+  }
+  
+  // Expose API on window for console access
+  window.colonistAdvisor = {
+    // Analysis
+    analyze: () => callContentScript('analyze'),
+    suggestPlacement: () => callContentScript('suggestPlacement'),
+    suggestRoad: () => callContentScript('suggestRoad'),
+    suggestBuild: () => callContentScript('suggestBuild'),
+    
+    // Data access
+    getState: () => callContentScript('getState'),
+    getMessages: () => callContentScript('getMessages'),
+    
+    // Save messages to file
+    saveMessages: () => callContentScript('saveMessages'),
+    
+    // Debug
+    checkCorner: (id) => callContentScript('checkCorner', id),
+    
+    // WebSocket info
     getConnections: () => Array.from(activeConnections.entries()),
     getConnectionCount: () => activeConnections.size,
+    
+    // Help
+    help: () => {
+      console.log(`
+╔═══════════════════════════════════════════════════════════╗
+║           COLONIST ADVISOR - COMMANDS                      ║
+╠═══════════════════════════════════════════════════════════╣
+║  colonistAdvisor.analyze()         Full game analysis      ║
+║  colonistAdvisor.suggestPlacement() Best settlement spots  ║
+║  colonistAdvisor.suggestRoad()      Best road options      ║
+║  colonistAdvisor.suggestBuild()     Build priority         ║
+║  colonistAdvisor.saveMessages()     Download all messages  ║
+║  colonistAdvisor.checkCorner(id)    Debug corner info      ║
+║  colonistAdvisor.help()             Show this help         ║
+╚═══════════════════════════════════════════════════════════╝
+      `);
+    },
+    
     version: '1.0.0'
   };
+  
+  console.log(`${LOG_PREFIX} ✅ API ready! Type colonistAdvisor.help() for commands`);
 })();

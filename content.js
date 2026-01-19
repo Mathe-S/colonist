@@ -1185,6 +1185,82 @@
     script.src = chrome.runtime.getURL('injected.js');
     script.onload = () => script.remove();
     (document.head || document.documentElement).appendChild(script);
+    
+    // Expose API to page context via postMessage
+    window.addEventListener('message', (event) => {
+      if (event.source !== window) return;
+      if (event.data?.source !== 'colonist-advisor-page-request') return;
+      
+      const { action, args } = event.data;
+      let result = null;
+      
+      try {
+        switch (action) {
+          case 'analyze':
+            result = Advisor.analyze();
+            break;
+          case 'suggestPlacement':
+            result = Advisor.suggestInitialPlacement();
+            break;
+          case 'suggestRoad':
+            result = Advisor.suggestRoadPlacement();
+            break;
+          case 'suggestBuild':
+            result = Advisor.suggestBuildPriority();
+            break;
+          case 'getState':
+            result = GameState;
+            break;
+          case 'getMessages':
+            result = GameState.messageLog;
+            break;
+          case 'saveMessages':
+            // Trigger download from content script
+            const data = {
+              exportedAt: new Date().toISOString(),
+              gameInfo: {
+                myColor: GameState.myColor,
+                players: GameState.players,
+                isSetupPhase: GameState.isSetupPhase,
+                completedTurns: GameState.completedTurns
+              },
+              messageCount: GameState.messageLog.length,
+              messages: GameState.messageLog
+            };
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `colonist-messages-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log(`${LOG_PREFIX} 💾 Saved ${GameState.messageLog.length} messages`);
+            result = { saved: GameState.messageLog.length };
+            break;
+          case 'checkCorner':
+            const id = args?.[0];
+            const corner = GameState.corners[id];
+            const neighbors = GameState.cornerToCorners[id] || [];
+            const tiles = GameState.cornerToTiles[id] || [];
+            result = { corner, neighbors, tiles };
+            console.log(`Corner ${id}:`, corner);
+            console.log(`  Neighbors:`, neighbors);
+            console.log(`  Tiles:`, tiles.map(t => GameState.tiles[t]));
+            break;
+        }
+      } catch (e) {
+        console.error(`${LOG_PREFIX} API error:`, e);
+      }
+      
+      window.postMessage({
+        source: 'colonist-advisor-page-response',
+        action,
+        result
+      }, '*');
+    });
 
     // Expose API on window
     window.colonistAdvisor = {
