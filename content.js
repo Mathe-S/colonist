@@ -746,7 +746,7 @@
       const spots = useServer ? GameState.availableSettlements : Object.keys(GameState.corners);
       
       const scored = [];
-      for (const cornerId of spots.slice(0, 20)) { // Limit for performance
+      for (const cornerId of spots.slice(0, 30)) { // Check more spots for better suggestions
         const result = Advisor.scoreCorner(cornerId, useServer);
         if (result) scored.push(result);
       }
@@ -761,11 +761,41 @@
         `;
       }
       
-      let html = `<div class="ca-section"><div class="ca-section-title">🏠 Best Settlement Spots</div>`;
+      // Build title with setup context
+      let title = '🏠 Best Settlement Spots';
+      let subtitle = '';
+      
+      if (GameState.isSetupPhase) {
+        const myPlaced = GameState.mySettlementCorners.length;
+        const isSecond = GameState.isSecondPlayer;
+        
+        if (myPlaced === 0) {
+          title = '🏠 First Settlement';
+          subtitle = isSecond ? 'You place 2 in a row! Pick high probability.' : 'Pick spot with best production.';
+        } else if (myPlaced === 1 && isSecond) {
+          title = '🏠 Second Settlement (Complement!)';
+          const myResources = Advisor.getMyResourceTypes();
+          const missing = ['wood', 'brick', 'sheep', 'wheat', 'ore'].filter(r => !myResources.has(r));
+          subtitle = missing.length > 0 ? `Need: ${missing.join(', ')}` : 'Get best production!';
+        } else {
+          title = `🏠 Settlement #${myPlaced + 1}`;
+        }
+      }
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">${title}</div>`;
+      if (subtitle) {
+        html += `<div class="ca-status" style="color: #ff9800; margin-bottom: 8px;">${subtitle}</div>`;
+      }
       
       for (let i = 0; i < Math.min(3, scored.length); i++) {
         const s = scored[i];
         const isTop = i === 0;
+        
+        // Check what new resources this spot adds
+        const myResources = Advisor.getMyResourceTypes();
+        const newTypes = s.resourceDiversity.filter(r => !myResources.has(r));
+        const newTypesStr = newTypes.length > 0 ? ` (+${newTypes.join(', ')})` : '';
+        
         html += `
           <div class="ca-suggestion ${isTop ? 'top' : ''}">
             <div class="ca-suggestion-header">
@@ -774,7 +804,7 @@
             </div>
             <div class="ca-suggestion-detail">
               ${s.tiles.join(', ')}<br>
-              ${s.resourceDiversity.join(', ')} • ${s.totalProbability} pips
+              ${s.resourceDiversity.join(', ')}${newTypesStr} • ${s.totalProbability} pips
             </div>
           </div>
         `;
@@ -785,40 +815,55 @@
     },
 
     renderRoadSuggestions() {
-      const roads = Advisor.suggestRoadPlacement ? 
-        (() => { 
-          // Suppress console output
-          const origLog = console.log;
-          console.log = () => {};
-          const result = Advisor.calculateAvailableRoads();
-          console.log = origLog;
-          return result;
-        })() : [];
+      // Use server's available roads if present, otherwise calculate
+      let roads = [];
+      if (GameState.availableRoads.length > 0) {
+        roads = GameState.availableRoads;
+      } else {
+        // Fallback: calculate ourselves (suppress console)
+        const origLog = console.log;
+        console.log = () => {};
+        roads = Advisor.calculateAvailableRoads ? Advisor.calculateAvailableRoads() : [];
+        console.log = origLog;
+      }
       
       if (roads.length === 0) {
         return '';
       }
       
-      // Score roads
+      // Score roads based on where they lead
       const scored = [];
-      for (const edgeId of roads.slice(0, 10)) {
+      for (const edgeId of roads.slice(0, 15)) {
         const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
         let bestScore = 0;
         let bestCorner = null;
+        let targetCornerId = null;
         
         for (const cid of [c1, c2]) {
-          if (cid !== undefined && GameState.corners[cid]?.owner === null) {
-            const cs = Advisor.scoreCorner(cid, false);
-            if (cs && cs.score > bestScore) {
-              bestScore = cs.score;
-              bestCorner = cs;
-            }
+          if (cid === undefined) continue;
+          
+          const corner = GameState.corners[cid];
+          // Skip corners we own (we're starting from there)
+          if (corner?.owner === GameState.myColor) continue;
+          // Skip corners owned by opponents
+          if (corner?.owner !== null && corner?.owner !== undefined) continue;
+          
+          // Score this potential expansion corner
+          const cs = Advisor.scoreCorner(cid, false);
+          if (cs && cs.score > bestScore) {
+            bestScore = cs.score;
+            bestCorner = cs;
+            targetCornerId = cid;
           }
         }
         
-        if (bestCorner) {
-          scored.push({ edgeId, score: Math.round(bestScore * 0.4), leadsTo: bestCorner });
-        }
+        // Always add road even if we couldn't score the corners (show edge ID)
+        scored.push({ 
+          edgeId, 
+          score: bestScore > 0 ? Math.round(bestScore * 0.5) : 10, // Default score if no scoring
+          leadsTo: bestCorner,
+          targetCornerId
+        });
       }
       scored.sort((a, b) => b.score - a.score);
       
@@ -829,6 +874,17 @@
       for (let i = 0; i < Math.min(2, scored.length); i++) {
         const r = scored[i];
         const isTop = i === 0;
+        
+        // Build detail text
+        let detailText = '';
+        if (r.leadsTo && r.leadsTo.tiles) {
+          detailText = `Leads to corner ${r.targetCornerId}: ${r.leadsTo.tiles.join(', ')}`;
+        } else if (r.targetCornerId !== null) {
+          detailText = `Leads to corner ${r.targetCornerId}`;
+        } else {
+          detailText = `Available road at edge ${r.edgeId}`;
+        }
+        
         html += `
           <div class="ca-suggestion ${isTop ? 'top' : ''}">
             <div class="ca-suggestion-header">
@@ -836,7 +892,7 @@
               <span class="ca-suggestion-score">${r.score}</span>
             </div>
             <div class="ca-suggestion-detail">
-              Leads to: ${r.leadsTo.tiles.join(', ')}
+              ${detailText}
             </div>
           </div>
         `;
@@ -1058,6 +1114,15 @@
     // Victory points tracking
     playerVP: {},              // color -> { settlements: n, cities: n, longestRoad: bool, largestArmy: bool, devCards: n }
     
+    // My placements tracking (for complementary suggestions)
+    mySettlementCorners: [],   // Corner IDs where I've built settlements
+    myRoadEdges: [],           // Edge IDs where I've built roads
+    setupPlacementCount: 0,    // How many settlements I've placed in setup phase
+    
+    // 1v1 Setup awareness
+    isSecondPlayer: false,     // Am I the second player in play order?
+    setupPhaseStep: 0,         // Track which step of setup we're in
+    
     // Tracking
     diceHistory: [],
     messageLog: [],
@@ -1092,6 +1157,11 @@
       this.largestArmySize = 0;
       this.opponentResources = {};
       this.playerVP = {};
+      this.mySettlementCorners = [];
+      this.myRoadEdges = [];
+      this.setupPlacementCount = 0;
+      this.isSecondPlayer = false;
+      this.setupPhaseStep = 0;
       this.diceHistory = [];
       this.messageLog = [];
       this.seenMessageTypes = new Set();
@@ -1576,7 +1646,15 @@
       // My color
       GameState.myColor = playerColor;
       GameState.playOrder = playOrder || [];
+      
+      // Detect if we're the second player (important for 1v1 setup)
+      const myPositionInOrder = playOrder ? playOrder.indexOf(playerColor) : -1;
+      GameState.isSecondPlayer = myPositionInOrder === 1;
+      
+      const playerCount = playOrder ? playOrder.length : 0;
+      const positionStr = GameState.isSecondPlayer ? '2nd (place 2 settlements!)' : '1st';
       console.log(`${LOG_PREFIX} 🎨 You are player color: ${PLAYER_COLORS[playerColor] || playerColor}`);
+      console.log(`${LOG_PREFIX} 📍 Play order position: ${positionStr} of ${playerCount} players`);
       
       // Parse players
       if (playerUserStates) {
@@ -1761,7 +1839,25 @@
           if (state.owner !== undefined && state.buildingType !== undefined) {
             const building = state.buildingType === 1 ? 'Settlement' : 'City';
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
+            const cId = parseInt(cornerId);
             console.log(`${LOG_PREFIX} 🏗️ ${playerName} built ${building} at corner ${cornerId}`);
+            
+            // Track MY settlements for complementary suggestions
+            if (state.owner === GameState.myColor && state.buildingType === 1) {
+              if (!GameState.mySettlementCorners.includes(cId)) {
+                GameState.mySettlementCorners.push(cId);
+                GameState.setupPlacementCount++;
+                console.log(`${LOG_PREFIX} 📍 My settlement #${GameState.setupPlacementCount} at corner ${cornerId}`);
+                
+                // Log resources from this settlement
+                const tileIds = GameState.cornerToTiles[cornerId] || [];
+                const resources = tileIds.map(tid => {
+                  const t = GameState.tiles[tid];
+                  return t && t.type !== 0 ? `${t.resource}(${t.diceNumber})` : null;
+                }).filter(Boolean);
+                console.log(`${LOG_PREFIX}    Resources: ${resources.join(', ')}`);
+              }
+            }
             
             // Track opponent spending
             if (state.owner !== GameState.myColor && !GameState.isSetupPhase) {
@@ -1772,9 +1868,20 @@
               }
             }
             
-            // If I just placed a settlement during setup, suggest roads
+            // If I just placed a settlement during setup
             if (state.owner === GameState.myColor && state.buildingType === 1 && GameState.isSetupPhase) {
-              setTimeout(() => Advisor.suggestRoadPlacement(), 150);
+              // Check if I need to place another settlement (second player places 2 in a row)
+              const needsAnotherSettlement = GameState.isSecondPlayer && GameState.setupPlacementCount === 1;
+              
+              if (needsAnotherSettlement) {
+                console.log(`${LOG_PREFIX} 🎯 Second player - need to place another settlement!`);
+                // Wait for next available settlements to be sent
+              }
+              
+              // Trigger road suggestions
+              setTimeout(() => {
+                AdvisorUI.update();
+              }, 150);
             }
           }
         }
@@ -1791,12 +1898,23 @@
           
           if (state.owner !== undefined) {
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
+            const eId = parseInt(edgeId);
             console.log(`${LOG_PREFIX} 🛤️ ${playerName} built Road at edge ${edgeId}`);
+            
+            // Track MY roads
+            if (state.owner === GameState.myColor) {
+              if (!GameState.myRoadEdges.includes(eId)) {
+                GameState.myRoadEdges.push(eId);
+              }
+            }
             
             // Track opponent spending
             if (state.owner !== GameState.myColor && !GameState.isSetupPhase) {
               this.trackOpponentSpend(state.owner, BUILD_COSTS.road);
             }
+            
+            // Update UI after road placement
+            setTimeout(() => AdvisorUI.update(), 100);
           }
         }
       }
@@ -2063,11 +2181,38 @@
       
       // 7. Complementary resources (cover what we don't have yet)
       breakdown.complement = 0;
-      if (!GameState.isSetupPhase || GameState.completedTurns >= 2) {
+      
+      // Apply complementary logic if:
+      // - Not in setup phase (regular game)
+      // - OR I've already placed at least one settlement (need to complement it)
+      const haveExistingSettlement = GameState.mySettlementCorners.length > 0;
+      
+      if (!GameState.isSetupPhase || haveExistingSettlement) {
         const myResTypes = this.getMyResourceTypes();
+        const myResProbability = this.getMyResourceProbability();
+        
         for (const res of resourceDiversity) {
           if (!myResTypes.has(res)) {
-            breakdown.complement += 8; // Bonus for new resource type
+            // Big bonus for completely new resource type
+            breakdown.complement += 15;
+          } else if (myResProbability[res] && myResProbability[res] < 3) {
+            // Smaller bonus for resource we have but with low probability
+            breakdown.complement += 5;
+          }
+        }
+        
+        // In 1v1 setup, second settlement should strongly complement first
+        if (GameState.isSetupPhase && GameState.isSecondPlayer && GameState.mySettlementCorners.length === 1) {
+          // Placing 2nd settlement as second player - CRITICAL to complement!
+          // Extra bonus for getting all 5 resource types between 2 settlements
+          const newTypes = Array.from(resourceDiversity).filter(r => !myResTypes.has(r));
+          if (newTypes.length >= 2) {
+            breakdown.complement += 20; // Big bonus for 2+ new types
+          }
+          
+          // Penalize spots that duplicate resources without adding new ones
+          if (newTypes.length === 0) {
+            breakdown.complement -= 15; // Penalty for pure duplication
           }
         }
       }
@@ -2142,6 +2287,26 @@
         }
       }
       return types;
+    },
+    
+    /**
+     * Get probability for each resource type from my settlements
+     */
+    getMyResourceProbability() {
+      const probs = {};
+      for (const [cornerId, corner] of Object.entries(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          const tileIds = GameState.cornerToTiles[cornerId] || [];
+          for (const tileId of tileIds) {
+            const tile = GameState.tiles[tileId];
+            if (tile && tile.type !== 0 && tile.resource) {
+              if (!probs[tile.resource]) probs[tile.resource] = 0;
+              probs[tile.resource] += tile.probability || 0;
+            }
+          }
+        }
+      }
+      return probs;
     },
     
     /**

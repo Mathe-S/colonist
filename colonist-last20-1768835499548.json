@@ -1,58 +1,58 @@
 {
-  "exportedAt": "2026-01-19T14:49:04.115Z",
+  "exportedAt": "2026-01-19T15:11:39.547Z",
   "description": "Last 20 messages for debugging",
   "gameInfo": {
-    "myColor": 1,
+    "myColor": 2,
     "players": {
       "1": {
-        "username": "Salvay8101",
+        "username": "Birkir",
         "isBot": false,
-        "userId": "45259847",
+        "userId": "90950896",
         "color": 1,
         "colorName": "red",
         "victoryPoints": 0
       },
-      "4": {
-        "username": "BWoody12",
+      "2": {
+        "username": "Salvay8101",
         "isBot": false,
-        "userId": "63592206",
-        "color": 4,
-        "colorName": "white",
+        "userId": "45259847",
+        "color": 2,
+        "colorName": "blue",
         "victoryPoints": 0
       }
     },
     "currentAction": "place_settlement",
     "currentTurnColor": 1
   },
-  "messageCount": 15,
+  "messageCount": 18,
   "messages": [
     {
-      "timestamp": 1768834124670,
+      "timestamp": 1768835431999,
       "data": {
         "type": "Connected",
-        "userSessionId": "07F81D.14138482"
+        "userSessionId": "08621E.5787348"
       }
     },
     {
-      "timestamp": 1768834124674,
+      "timestamp": 1768835432049,
       "data": {
         "type": "SessionEstablished"
       }
     },
     {
-      "timestamp": 1768834124674,
+      "timestamp": 1768835432052,
       "data": {
         "id": "133",
         "data": {
           "type": 2,
           "payload": {
-            "id": "07F81D.14138482"
+            "id": "08621E.5787348"
           }
         }
       }
     },
     {
-      "timestamp": 1768834125007,
+      "timestamp": 1768835432337,
       "data": {
         "id": "139",
         "data": {
@@ -67,7 +67,7 @@
       }
     },
     {
-      "timestamp": 1768834125008,
+      "timestamp": 1768835432338,
       "data": {
         "id": "139",
         "data": {
@@ -81,7 +81,7 @@
       }
     },
     {
-      "timestamp": 1768834125473,
+      "timestamp": 1768835432842,
       "data": {
         "id": "135",
         "data": {
@@ -115,7 +115,7 @@
       }
     },
     {
-      "timestamp": 1768834126326,
+      "timestamp": 1768835433777,
       "data": {
         "id": "131",
         "data": {
@@ -128,7 +128,7 @@
       }
     },
     {
-      "timestamp": 1768834127284,
+      "timestamp": 1768835434397,
       "data": {
         "id": "130",
         "data": {
@@ -139,15 +139,15 @@
       }
     },
     {
-      "timestamp": 1768834127347,
+      "timestamp": 1768835434514,
       "data": {
         "id": "130",
         "data": {
           "type": 1,
           "payload": {
-            "gameSettingId": "pack9283",
+            "gameSettingId": "luck7129",
             "shouldResetGameClient": true,
-            "databaseGameId": "201582609",
+            "databaseGameId": "201586552",
             "serverId": "061904",
             "isReconnectingSession": false
           },
@@ -156,16 +156,16 @@
       }
     },
     {
-      "timestamp": 1768834127383,
+      "timestamp": 1768835434515,
       "data": {
         "id": "130",
         "data": {
           "type": 4,
           "payload": {
-            "playerColor": 1,
+            "playerColor": 2,
             "playOrder": [
-              4,
-              1
+              1,
+              2
             ],
             "gameState": {
               "diceState": {
@@ -188,115 +188,115 @@
                   "0": {
                     "x": 0,
                     "y": -2,
-                    "type": 1,
-                    "diceNumber": 9
+                    "type": 4,
+                    "diceNumber": 8
                   },
                   "1": {
                     "x": -1,
                     "y": -1,
-                    "type": 1,
-                    "diceNumber": 12
+                    "type": 4,
+                    "diceNumber": 4
                   },
                   "2": {
                     "x": -2,
                     "y": 0,
-                    "type": 4,
+                    "type": 3,
                     "diceNumber": 11
                   },
                   "3": {
                     "x": -2,
                     "y": 1,
-                    "type": 0,
-                    "diceNumber": 0
+                    "type": 4,
+                    "diceNumber": 12
                   },
                   "4": {
                     "x": -2,
                     "y": 2,
-                    "type": 5,
-                    "diceNumber": 4
+                    "type": 1,
+                    "diceNumber": 9
                   },
                   "5": {
                     "x": -1,
                     "y": 2,
-                    "type": 5,
-                    "diceNumber": 8
+                    "type": 2,
+                    "diceNumber": 10
                   },
                   "6": {
                     "x": 0,
                     "y": 2,
                     "type": 2,
-                    "diceNumber": 5
+                    "diceNumber": 8
                   },
                   "7": {
                     "x": 1,
                     "y": 1,
-                    "type": 3,
-                    "diceNumber": 2
+                    "type": 5,
+                    "diceNumber": 3
                   },
                   "8": {
                     "x": 2,
                     "y": 0,
-                    "type": 4,
+                    "type": 1,
                     "diceNumber": 6
                   },
                   "9": {
                     "x": 2,
                     "y": -1,
-                    "type": 1,
-                    "diceNumber": 3
+                    "type": 3,
+                    "diceNumber": 2
                   },
                   "10": {
                     "x": 2,
                     "y": -2,
-                    "type": 2,
-                    "diceNumber": 8
+                    "type": 1,
+                    "diceNumber": 5
                   },
                   "11": {
                     "x": 1,
                     "y": -2,
-                    "type": 2,
+                    "type": 5,
                     "diceNumber": 10
                   },
                   "12": {
                     "x": 0,
                     "y": -1,
-                    "type": 1,
-                    "diceNumber": 5
+                    "type": 2,
+                    "diceNumber": 3
                   },
                   "13": {
                     "x": -1,
                     "y": 0,
-                    "type": 4,
+                    "type": 3,
                     "diceNumber": 6
                   },
                   "14": {
                     "x": -1,
                     "y": 1,
-                    "type": 4,
-                    "diceNumber": 3
+                    "type": 3,
+                    "diceNumber": 5
                   },
                   "15": {
                     "x": 0,
                     "y": 1,
-                    "type": 5,
-                    "diceNumber": 10
+                    "type": 0,
+                    "diceNumber": 0
                   },
                   "16": {
                     "x": 1,
                     "y": 0,
-                    "type": 3,
-                    "diceNumber": 9
+                    "type": 1,
+                    "diceNumber": 4
                   },
                   "17": {
                     "x": 1,
                     "y": -1,
-                    "type": 3,
-                    "diceNumber": 4
+                    "type": 4,
+                    "diceNumber": 9
                   },
                   "18": {
                     "x": 0,
                     "y": 0,
-                    "type": 3,
+                    "type": 5,
                     "diceNumber": 11
                   }
                 },
@@ -939,7 +939,7 @@
                     "x": 0,
                     "y": -2,
                     "z": 0,
-                    "type": 4
+                    "type": 3
                   },
                   "1": {
                     "x": -2,
@@ -951,7 +951,7 @@
                     "x": -1,
                     "y": 3,
                     "z": 0,
-                    "type": 3
+                    "type": 2
                   },
                   "3": {
                     "x": 3,
@@ -963,7 +963,7 @@
                     "x": -1,
                     "y": -1,
                     "z": 1,
-                    "type": 5
+                    "type": 6
                   },
                   "5": {
                     "x": -2,
@@ -975,19 +975,19 @@
                     "x": 1,
                     "y": 2,
                     "z": 0,
-                    "type": 2
+                    "type": 4
                   },
                   "7": {
                     "x": 2,
                     "y": -3,
                     "z": 2,
-                    "type": 6
+                    "type": 1
                   },
                   "8": {
                     "x": 3,
                     "y": -2,
                     "z": 2,
-                    "type": 1
+                    "type": 5
                   }
                 }
               },
@@ -995,8 +995,8 @@
                 "completedTurns": 0,
                 "turnState": 0,
                 "actionState": 1,
-                "currentTurnPlayerColor": 4,
-                "startTime": 1768834127350,
+                "currentTurnPlayerColor": 1,
+                "startTime": 1768835434542,
                 "allocatedTime": 60
               },
               "tradeState": {
@@ -1006,7 +1006,7 @@
                   "1": {
                     "activeEmbargosAgainst": []
                   },
-                  "4": {
+                  "2": {
                     "activeEmbargosAgainst": []
                   }
                 }
@@ -1029,8 +1029,8 @@
                   "isConnected": true,
                   "isTakingAction": false
                 },
-                "4": {
-                  "color": 4,
+                "2": {
+                  "color": 2,
                   "victoryPointsState": {},
                   "bankTradeRatiosState": {
                     "1": 4,
@@ -1065,7 +1065,7 @@
                 "1": {
                   "bankSettlementAmount": 5
                 },
-                "4": {
+                "2": {
                   "bankSettlementAmount": 5
                 }
               },
@@ -1073,7 +1073,7 @@
                 "1": {
                   "bankCityAmount": 4
                 },
-                "4": {
+                "2": {
                   "bankCityAmount": 4
                 }
               },
@@ -1081,7 +1081,7 @@
                 "1": {
                   "bankRoadAmount": 15
                 },
-                "4": {
+                "2": {
                   "bankRoadAmount": 15
                 }
               },
@@ -1122,7 +1122,7 @@
                     },
                     "developmentCardsUsed": []
                   },
-                  "4": {
+                  "2": {
                     "developmentCards": {
                       "cards": []
                     },
@@ -1134,28 +1134,28 @@
                 "1": {
                   "longestRoad": 0
                 },
-                "4": {
+                "2": {
                   "longestRoad": 0
                 }
               },
               "mechanicLargestArmyState": {
                 "1": {},
-                "4": {}
+                "2": {}
               },
               "mechanicRobberState": {
-                "locationTileIndex": 3,
+                "locationTileIndex": 15,
                 "isActive": true
               }
             },
             "playerUserStates": [
               {
-                "userId": "63592206",
-                "username": "BWoody12",
+                "userId": "90950896",
+                "username": "Birkir",
                 "databaseIcon": 11,
-                "selectedColor": 4,
+                "selectedColor": 1,
                 "isBot": false,
-                "deviceType": 4,
-                "countryCode": "US",
+                "deviceType": 1,
+                "countryCode": "FR",
                 "regionUpdated": null,
                 "membership": null,
                 "profilePictureUrl": null
@@ -1164,7 +1164,7 @@
                 "userId": "45259847",
                 "username": "Salvay8101",
                 "databaseIcon": 11,
-                "selectedColor": 1,
+                "selectedColor": 2,
                 "isBot": false,
                 "deviceType": 1,
                 "countryCode": "GE",
@@ -1179,7 +1179,7 @@
               "isDiscord": false
             },
             "gameSettings": {
-              "id": "pack9283",
+              "id": "luck7129",
               "channelId": null,
               "gameType": 6,
               "privateGame": false,
@@ -1207,7 +1207,7 @@
       }
     },
     {
-      "timestamp": 1768834127388,
+      "timestamp": 1768835434521,
       "data": {
         "id": "130",
         "data": {
@@ -1218,7 +1218,7 @@
       }
     },
     {
-      "timestamp": 1768834135816,
+      "timestamp": 1768835445659,
       "data": {
         "id": "130",
         "data": {
@@ -1229,7 +1229,7 @@
       }
     },
     {
-      "timestamp": 1768834135837,
+      "timestamp": 1768835445680,
       "data": {
         "id": "130",
         "data": {
@@ -1238,19 +1238,19 @@
             "diff": {
               "mapState": {
                 "tileCornerStates": {
-                  "23": {
-                    "owner": 4,
+                  "18": {
+                    "owner": 1,
                     "buildingType": 1
                   }
                 }
               },
               "currentState": {
                 "actionState": 3,
-                "startTime": 1768834135964,
+                "startTime": 1768835445883,
                 "allocatedTime": 15
               },
               "playerStates": {
-                "4": {
+                "1": {
                   "victoryPointsState": {
                     "0": 1
                   }
@@ -1260,14 +1260,14 @@
                 "2": {
                   "text": {
                     "type": 4,
-                    "playerColor": 4,
+                    "playerColor": 1,
                     "pieceEnum": 2
                   },
-                  "from": 4
+                  "from": 1
                 }
               },
               "mechanicSettlementState": {
-                "4": {
+                "1": {
                   "bankSettlementAmount": 4
                 }
               }
@@ -1279,7 +1279,7 @@
       }
     },
     {
-      "timestamp": 1768834138279,
+      "timestamp": 1768835447365,
       "data": {
         "id": "130",
         "data": {
@@ -1290,7 +1290,7 @@
       }
     },
     {
-      "timestamp": 1768834138294,
+      "timestamp": 1768835447379,
       "data": {
         "id": "130",
         "data": {
@@ -1311,14 +1311,14 @@
             12,
             13,
             14,
-            15,
             16,
             17,
-            18,
-            19,
             20,
             21,
+            23,
+            24,
             25,
+            26,
             27,
             28,
             29,
@@ -1348,6 +1348,43 @@
             53
           ],
           "sequence": 8
+        }
+      }
+    },
+    {
+      "timestamp": 1768835455383,
+      "data": {
+        "id": "130",
+        "data": {
+          "type": 31,
+          "payload": [
+            6,
+            62,
+            7
+          ],
+          "sequence": 11
+        }
+      }
+    },
+    {
+      "timestamp": 1768835467789,
+      "data": {
+        "id": "130",
+        "data": {
+          "type": 32,
+          "payload": [],
+          "sequence": 15
+        }
+      }
+    },
+    {
+      "timestamp": 1768835467789,
+      "data": {
+        "id": "130",
+        "data": {
+          "type": 33,
+          "payload": [],
+          "sequence": 18
         }
       }
     }
