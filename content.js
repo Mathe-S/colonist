@@ -42,14 +42,21 @@
   };
 
   const ACTION_STATES = {
-    0: 'waiting',
+    0: 'roll_dice',
     1: 'place_settlement',
-    2: 'place_road',
-    3: 'roll_dice',
-    4: 'discard',
-    5: 'move_robber',
-    6: 'steal_card',
-    7: 'main_turn'
+    3: 'place_road',
+    7: 'main_turn',
+    24: 'place_robber',
+    25: 'steal_card',
+    4: 'discard'
+  };
+
+  // Building costs
+  const BUILD_COSTS = {
+    road: { wood: 1, brick: 1 },
+    settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
+    city: { wheat: 2, ore: 3 },
+    devCard: { sheep: 1, wheat: 1, ore: 1 }
   };
 
   const PLAYER_COLORS = {
@@ -205,9 +212,18 @@
     isSetupPhase: false,
     completedTurns: 0,
     
+    // Available spots (from server - types 30, 31, 32, 33)
+    availableSettlements: [],  // Corner IDs where I can build settlements
+    availableRoads: [],        // Edge IDs where I can build roads
+    availableCities: [],       // Corner IDs where I can upgrade to city
+    availableRobberSpots: [],  // Tile IDs where I can place robber
+    
     // My resources (only visible to me)
     myResources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
     myDevCards: [],
+    
+    // Opponent resource tracking (probability-based)
+    opponentResources: {},     // color -> { wood: estimate, ... }
     
     // Tracking
     diceHistory: [],
@@ -230,8 +246,13 @@
       this.currentTurnColor = null;
       this.isSetupPhase = false;
       this.completedTurns = 0;
+      this.availableSettlements = [];
+      this.availableRoads = [];
+      this.availableCities = [];
+      this.availableRobberSpots = [];
       this.myResources = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
       this.myDevCards = [];
+      this.opponentResources = {};
       this.diceHistory = [];
       this.messageLog = [];
     }
@@ -466,12 +487,64 @@
       // Handle ANY id with data.type (works for bot games id=130 and 1v1 games id="133","139",etc.)
       if (data?.type !== undefined) {
         const msgType = data.type;
+        const payload = data.payload;
         
         // Type 4 = Full game state (game started)
-        if (msgType === 4 && data.payload) {
+        if (msgType === 4 && payload) {
           console.log(`${LOG_PREFIX} 🎮 GAME STARTED (id=${id}, type=${msgType})`);
-          this.parseFullGameState(data.payload);
+          this.parseFullGameState(payload);
           return { isGameStart: true };
+        }
+        
+        // Type 28 = Resource distribution (track opponent resources)
+        if (msgType === 28 && Array.isArray(payload)) {
+          this.parseResourceDistribution(payload);
+          return { isResourceDist: true };
+        }
+        
+        // Type 30 = Available settlement spots
+        if (msgType === 30 && Array.isArray(payload)) {
+          GameState.availableSettlements = payload;
+          if (payload.length > 0 && GameState.currentTurnColor === GameState.myColor) {
+            console.log(`${LOG_PREFIX} 🏠 Available settlements: ${payload.length} spots`);
+            // Auto-suggest if it's our turn to place
+            if (GameState.currentAction === 'place_settlement' || GameState.currentAction === 1) {
+              setTimeout(() => Advisor.suggestInitialPlacement(), 50);
+            }
+          }
+          return { isAvailableSpots: true };
+        }
+        
+        // Type 31 = Available road spots
+        if (msgType === 31 && Array.isArray(payload)) {
+          GameState.availableRoads = payload;
+          if (payload.length > 0 && GameState.currentTurnColor === GameState.myColor) {
+            console.log(`${LOG_PREFIX} 🛤️ Available roads: ${payload.length} spots`);
+            // Auto-suggest if it's our turn to place
+            if (GameState.currentAction === 'place_road' || GameState.currentAction === 3) {
+              setTimeout(() => Advisor.suggestRoadPlacement(), 50);
+            }
+          }
+          return { isAvailableSpots: true };
+        }
+        
+        // Type 32 = Available city upgrades
+        if (msgType === 32 && Array.isArray(payload)) {
+          GameState.availableCities = payload;
+          if (payload.length > 0 && DEBUG) {
+            console.log(`${LOG_PREFIX} 🏰 Available cities: ${payload.length} spots`);
+          }
+          return { isAvailableSpots: true };
+        }
+        
+        // Type 33 = Available robber spots
+        if (msgType === 33 && Array.isArray(payload)) {
+          GameState.availableRobberSpots = payload;
+          if (payload.length > 0 && GameState.currentTurnColor === GameState.myColor) {
+            console.log(`${LOG_PREFIX} 🦹 Available robber spots: ${payload.length} tiles`);
+            setTimeout(() => Advisor.suggestRobberPlacement(), 50);
+          }
+          return { isAvailableSpots: true };
         }
         
         // Type 91 = Game state diff
@@ -493,6 +566,35 @@
       }
       
       return {};
+    },
+    
+    /**
+     * Parse resource distribution (type 28) to track opponent resources
+     */
+    parseResourceDistribution(distributions) {
+      for (const dist of distributions) {
+        const { owner, card, distributionType } = dist;
+        if (!owner) continue;
+        
+        // Convert card type to resource name
+        const resourceMap = { 1: 'wood', 2: 'sheep', 3: 'ore', 4: 'wheat', 5: 'brick' };
+        const resource = resourceMap[card];
+        
+        if (owner === GameState.myColor) {
+          // Update my resources (we get exact info from diffs, but this confirms)
+          if (resource && GameState.myResources[resource] !== undefined) {
+            // Already tracked via diff, skip
+          }
+        } else {
+          // Track opponent resources (estimate)
+          if (!GameState.opponentResources[owner]) {
+            GameState.opponentResources[owner] = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
+          }
+          if (resource) {
+            GameState.opponentResources[owner][resource]++;
+          }
+        }
+      }
     },
     
     parseFullGameState(payload) {
@@ -790,31 +892,42 @@
   const Advisor = {
     /**
      * Calculate score for a corner position
+     * @param {number|string} cornerId - Corner to score
+     * @param {boolean} useServerAvailable - Only score if server says it's available
      */
-    scoreCorner(cornerId) {
-      const corner = GameState.corners[cornerId];
+    scoreCorner(cornerId, useServerAvailable = false) {
+      const cId = parseInt(cornerId);
+      const corner = GameState.corners[cId];
       if (!corner) return null;
       
-      // Skip if already occupied (owner is set and not null/undefined)
-      if (corner.owner !== null && corner.owner !== undefined) return null;
-      
-      // Skip if adjacent corner is occupied (distance rule)
-      const neighbors = GameState.cornerToCorners[cornerId] || [];
-      for (const neighborId of neighbors) {
-        const neighborOwner = GameState.corners[neighborId]?.owner;
-        if (neighborOwner !== null && neighborOwner !== undefined) {
+      // If using server's available spots, check if this corner is in the list
+      if (useServerAvailable && GameState.availableSettlements.length > 0) {
+        if (!GameState.availableSettlements.includes(cId)) {
           return null;
+        }
+      } else {
+        // Fallback: manual validation
+        // Skip if already occupied
+        if (corner.owner !== null && corner.owner !== undefined) return null;
+        
+        // Skip if adjacent corner is occupied (distance rule)
+        const neighbors = GameState.cornerToCorners[cId] || [];
+        for (const neighborId of neighbors) {
+          const neighborOwner = GameState.corners[neighborId]?.owner;
+          if (neighborOwner !== null && neighborOwner !== undefined) {
+            return null;
+          }
         }
       }
       
       // Get adjacent tiles
-      const tileIds = GameState.cornerToTiles[cornerId] || [];
+      const tileIds = GameState.cornerToTiles[cId] || [];
       if (tileIds.length === 0) return null;
       
       let totalProbability = 0;
       let resourceDiversity = new Set();
       let resources = {};
-      let hasPort = corner.port ? corner.port : null;
+      let hasPort = this.getPortForCorner(cId);
       
       for (const tileId of tileIds) {
         const tile = GameState.tiles[tileId];
@@ -831,53 +944,110 @@
         resources[tile.resource].numbers.push(tile.diceNumber);
       }
       
-      // Scoring formula
+      // ===== ENHANCED SCORING =====
       let score = 0;
+      let breakdown = {};
       
-      // 1. Total probability (pips) - most important
-      score += totalProbability * 10;
+      // 1. Total probability (pips) - foundation of score (max ~15 pips = 150 points)
+      breakdown.probability = totalProbability * 10;
+      score += breakdown.probability;
       
-      // 2. Resource diversity bonus
-      score += resourceDiversity.size * 8;
+      // 2. Resource diversity bonus (more types = better)
+      breakdown.diversity = resourceDiversity.size * 12;
+      score += breakdown.diversity;
       
-      // 3. Resource type bonuses (ore and wheat more valuable mid/late game)
-      if (resources.ore) score += resources.ore.probability * 2;
-      if (resources.wheat) score += resources.wheat.probability * 2;
+      // 3. Strategic resource bonus
+      // Ore + Wheat = cities and dev cards (late game power)
+      // Wood + Brick = roads and settlements (early expansion)
+      breakdown.strategic = 0;
+      if (GameState.isSetupPhase) {
+        // Early game: wood/brick for expansion, but ore/wheat needed for cities
+        if (resources.ore) breakdown.strategic += resources.ore.probability * 3;
+        if (resources.wheat) breakdown.strategic += resources.wheat.probability * 3;
+        if (resources.wood) breakdown.strategic += resources.wood.probability * 1;
+        if (resources.brick) breakdown.strategic += resources.brick.probability * 1;
+      } else {
+        // Mid/Late game: ore/wheat more valuable
+        if (resources.ore) breakdown.strategic += resources.ore.probability * 4;
+        if (resources.wheat) breakdown.strategic += resources.wheat.probability * 4;
+      }
+      score += breakdown.strategic;
       
-      // 4. Port bonus
+      // 4. Port bonus - 2:1 ports are very valuable with matching resource
+      breakdown.port = 0;
       if (hasPort) {
         if (hasPort.ratio === 3) {
-          score += 5; // 3:1 port
-        } else {
-          // 2:1 port - valuable if we have the matching resource
+          breakdown.port = 8; // 3:1 port
+        } else if (hasPort.ratio === 2) {
+          // 2:1 port - extra valuable if we produce that resource
           if (resources[hasPort.resource]) {
-            score += 10 + resources[hasPort.resource].probability;
+            breakdown.port = 15 + resources[hasPort.resource].probability * 2;
           } else {
-            score += 3;
+            breakdown.port = 5;
           }
         }
       }
+      score += breakdown.port;
       
-      // 5. Avoid robber tile
-      if (tileIds.includes(GameState.robberTile)) {
-        score -= 5;
-      }
-      
-      // 6. Number quality - prefer 6, 8, 5, 9
+      // 5. Number quality bonus (6 and 8 are best, then 5 and 9)
+      breakdown.numbers = 0;
       for (const tileId of tileIds) {
         const tile = GameState.tiles[tileId];
-        if (tile && (tile.diceNumber === 6 || tile.diceNumber === 8)) {
-          score += 3;
+        if (!tile) continue;
+        if (tile.diceNumber === 6 || tile.diceNumber === 8) breakdown.numbers += 5;
+        else if (tile.diceNumber === 5 || tile.diceNumber === 9) breakdown.numbers += 2;
+      }
+      score += breakdown.numbers;
+      
+      // 6. Robber penalty
+      breakdown.robber = 0;
+      if (tileIds.includes(GameState.robberTile)) {
+        breakdown.robber = -8;
+      }
+      score += breakdown.robber;
+      
+      // 7. Complementary resources (cover what we don't have yet)
+      breakdown.complement = 0;
+      if (!GameState.isSetupPhase || GameState.completedTurns >= 2) {
+        const myResTypes = this.getMyResourceTypes();
+        for (const res of resourceDiversity) {
+          if (!myResTypes.has(res)) {
+            breakdown.complement += 8; // Bonus for new resource type
+          }
         }
       }
+      score += breakdown.complement;
+      
+      // 8. Expansion potential (are there good spots reachable from here?)
+      breakdown.expansion = 0;
+      const adjacentEdges = GameState.cornerToEdges[cId] || [];
+      for (const edgeId of adjacentEdges) {
+        const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+        const nextCorner = (c1 == cId) ? c2 : c1;
+        if (nextCorner !== undefined) {
+          // Quick check: is the next corner potentially buildable?
+          const nc = GameState.corners[nextCorner];
+          if (nc && nc.owner === null) {
+            const nextTiles = GameState.cornerToTiles[nextCorner] || [];
+            let nextProb = 0;
+            for (const tid of nextTiles) {
+              const t = GameState.tiles[tid];
+              if (t && t.type !== 0) nextProb += t.probability || 0;
+            }
+            if (nextProb >= 10) breakdown.expansion += 3;
+          }
+        }
+      }
+      score += breakdown.expansion;
       
       return {
-        cornerId: parseInt(cornerId),
+        cornerId: cId,
         score: Math.round(score * 10) / 10,
         totalProbability,
         resources,
         resourceDiversity: Array.from(resourceDiversity),
         port: hasPort,
+        breakdown,
         tiles: tileIds.map(id => {
           const t = GameState.tiles[id];
           return t ? `${t.resource}(${t.diceNumber})` : null;
@@ -886,155 +1056,379 @@
     },
     
     /**
+     * Get port info for a corner (if any)
+     */
+    getPortForCorner(cornerId) {
+      // Check edges adjacent to this corner for ports
+      const edgeIds = GameState.cornerToEdges[cornerId] || [];
+      for (const edgeId of edgeIds) {
+        const port = GameState.ports[edgeId];
+        if (port) {
+          return port;
+        }
+      }
+      return null;
+    },
+    
+    /**
+     * Get set of resource types I'm currently producing
+     */
+    getMyResourceTypes() {
+      const types = new Set();
+      for (const [cornerId, corner] of Object.entries(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          const tileIds = GameState.cornerToTiles[cornerId] || [];
+          for (const tileId of tileIds) {
+            const tile = GameState.tiles[tileId];
+            if (tile && tile.type !== 0) {
+              types.add(tile.resource);
+            }
+          }
+        }
+      }
+      return types;
+    },
+    
+    /**
      * Suggest best positions for initial settlement placement
      */
     suggestInitialPlacement() {
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
-      console.log(`${LOG_PREFIX} 🎯 INITIAL PLACEMENT ANALYSIS`);
+      console.log(`${LOG_PREFIX} 🎯 SETTLEMENT PLACEMENT ANALYSIS`);
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
       const scores = [];
+      const useServer = GameState.availableSettlements.length > 0;
       
-      for (const cornerId of Object.keys(GameState.corners)) {
-        const result = this.scoreCorner(cornerId);
-        if (result) {
-          scores.push(result);
+      if (useServer) {
+        // Use server's available spots (accurate)
+        for (const cornerId of GameState.availableSettlements) {
+          const result = this.scoreCorner(cornerId, true);
+          if (result) {
+            scores.push(result);
+          }
         }
+        console.log(`${LOG_PREFIX} Using server data: ${GameState.availableSettlements.length} valid spots`);
+      } else {
+        // Fallback: calculate ourselves
+        for (const cornerId of Object.keys(GameState.corners)) {
+          const result = this.scoreCorner(cornerId, false);
+          if (result) {
+            scores.push(result);
+          }
+        }
+        console.log(`${LOG_PREFIX} Using calculated spots: ${scores.length} valid spots`);
       }
       
       // Sort by score descending
       scores.sort((a, b) => b.score - a.score);
       
+      if (scores.length === 0) {
+        console.log(`${LOG_PREFIX} ❌ No valid settlement spots found`);
+        return [];
+      }
+      
       // Show top 5
-      console.log(`${LOG_PREFIX} 🏆 TOP 5 SETTLEMENT SPOTS:`);
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX} 🏆 TOP ${Math.min(5, scores.length)} SETTLEMENT SPOTS:`);
       console.log(`${LOG_PREFIX} `);
       
       for (let i = 0; i < Math.min(5, scores.length); i++) {
         const s = scores[i];
-        const portInfo = s.port ? ` | Port: ${s.port.ratio}:1 ${s.port.resource}` : '';
-        console.log(`${LOG_PREFIX}   ${i + 1}. Corner ${s.cornerId} (Score: ${s.score})`);
-        console.log(`${LOG_PREFIX}      Tiles: ${s.tiles.join(', ')}`);
-        console.log(`${LOG_PREFIX}      Pips: ${s.totalProbability} | Diversity: ${s.resourceDiversity.join(', ')}${portInfo}`);
+        const portInfo = s.port ? `🚢 ${s.port.ratio}:1 ${s.port.resource}` : '';
+        const b = s.breakdown;
+        
+        console.log(`${LOG_PREFIX}   ${i === 0 ? '⭐' : (i + 1) + '.'} Corner ${s.cornerId} — Score: ${s.score}`);
+        console.log(`${LOG_PREFIX}      📍 Tiles: ${s.tiles.join(', ')}`);
+        console.log(`${LOG_PREFIX}      🎲 Pips: ${s.totalProbability} | 🌈 Resources: ${s.resourceDiversity.join(', ')} ${portInfo}`);
+        
+        // Show score breakdown for top pick
+        if (i === 0 && b) {
+          const parts = [];
+          if (b.probability) parts.push(`prob:${b.probability}`);
+          if (b.diversity) parts.push(`div:${b.diversity}`);
+          if (b.strategic) parts.push(`strat:${b.strategic}`);
+          if (b.port) parts.push(`port:${b.port}`);
+          if (b.complement) parts.push(`new:${b.complement}`);
+          if (b.expansion) parts.push(`exp:${b.expansion}`);
+          console.log(`${LOG_PREFIX}      📊 Breakdown: ${parts.join(' + ')}`);
+        }
         console.log(`${LOG_PREFIX} `);
       }
       
+      console.log(`${LOG_PREFIX} 💡 Recommendation: Build on Corner ${scores[0].cornerId}`);
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
       return scores.slice(0, 5);
     },
     
     /**
-     * Suggest best road placement after placing a settlement
+     * Suggest best road placement
      */
     suggestRoadPlacement() {
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
-      console.log(`${LOG_PREFIX} 🛤️ ROAD PLACEMENT SUGGESTION`);
+      console.log(`${LOG_PREFIX} 🛤️ ROAD PLACEMENT ANALYSIS`);
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
-      // Find my settlements/cities
-      const myBuildings = [];
-      for (const [cornerId, corner] of Object.entries(GameState.corners)) {
-        if (corner.owner === GameState.myColor) {
-          myBuildings.push(parseInt(cornerId));
-        }
-      }
+      const useServer = GameState.availableRoads.length > 0;
+      const roadCandidates = useServer ? GameState.availableRoads : this.calculateAvailableRoads();
       
-      if (myBuildings.length === 0) {
-        console.log(`${LOG_PREFIX}   No buildings found yet`);
+      if (roadCandidates.length === 0) {
+        console.log(`${LOG_PREFIX} ❌ No available road spots`);
         return [];
       }
       
-      // Find edges adjacent to my buildings that are not yet built
-      const availableRoads = [];
+      console.log(`${LOG_PREFIX} ${useServer ? 'Using server data' : 'Calculated'}: ${roadCandidates.length} valid spots`);
       
-      for (const cornerId of myBuildings) {
+      // Score each road
+      const scoredRoads = [];
+      
+      for (const edgeId of roadCandidates) {
+        const edge = GameState.edges[edgeId];
+        if (!edge) continue;
+        
+        const [corner1, corner2] = GameState.edgeToCorners[edgeId] || [];
+        if (corner1 === undefined || corner2 === undefined) continue;
+        
+        let score = 0;
+        let leadsTo = [];
+        let breakdown = { expansion: 0, port: 0, longestRoad: 0 };
+        
+        // Score based on where it leads
+        for (const cornerId of [corner1, corner2]) {
+          const c = GameState.corners[cornerId];
+          if (c && c.owner === null) {
+            // This road leads to an empty corner - score it
+            const cornerScore = this.scoreCorner(cornerId, false);
+            if (cornerScore) {
+              breakdown.expansion += Math.round(cornerScore.score * 0.4);
+              leadsTo.push({
+                corner: cornerId,
+                tiles: cornerScore.tiles,
+                score: cornerScore.score
+              });
+            }
+            
+            // Port bonus
+            const port = this.getPortForCorner(cornerId);
+            if (port) {
+              breakdown.port += (port.ratio === 2) ? 8 : 4;
+            }
+          }
+        }
+        
+        // Longest road potential (simplified)
+        breakdown.longestRoad = 2; // Base value for extending road network
+        
+        score = breakdown.expansion + breakdown.port + breakdown.longestRoad;
+        
+        scoredRoads.push({
+          edgeId: parseInt(edgeId),
+          score: Math.round(score),
+          leadsTo,
+          breakdown
+        });
+      }
+      
+      // Sort by score
+      scoredRoads.sort((a, b) => b.score - a.score);
+      
+      if (scoredRoads.length === 0) {
+        console.log(`${LOG_PREFIX} ❌ Could not score any roads`);
+        return [];
+      }
+      
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX} 🏆 TOP ${Math.min(3, scoredRoads.length)} ROAD OPTIONS:`);
+      console.log(`${LOG_PREFIX} `);
+      
+      for (let i = 0; i < Math.min(3, scoredRoads.length); i++) {
+        const r = scoredRoads[i];
+        const bestDest = r.leadsTo[0];
+        
+        console.log(`${LOG_PREFIX}   ${i === 0 ? '⭐' : (i + 1) + '.'} Edge ${r.edgeId} — Score: ${r.score}`);
+        if (bestDest) {
+          console.log(`${LOG_PREFIX}      ➡️ Leads to Corner ${bestDest.corner}: ${bestDest.tiles.join(', ')}`);
+        }
+        console.log(`${LOG_PREFIX} `);
+      }
+      
+      console.log(`${LOG_PREFIX} 💡 Recommendation: Build on Edge ${scoredRoads[0].edgeId}`);
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      
+      return scoredRoads.slice(0, 3);
+    },
+    
+    /**
+     * Fallback: calculate available roads ourselves
+     */
+    calculateAvailableRoads() {
+      const available = [];
+      
+      // Roads must connect to my existing roads or buildings
+      const myCorners = new Set();
+      const myEdges = new Set();
+      
+      for (const [cornerId, corner] of Object.entries(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          myCorners.add(parseInt(cornerId));
+        }
+      }
+      
+      for (const [edgeId, edge] of Object.entries(GameState.edges)) {
+        if (edge.owner === GameState.myColor) {
+          myEdges.add(parseInt(edgeId));
+          // Also add corners connected to my roads
+          const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+          if (c1 !== undefined) myCorners.add(c1);
+          if (c2 !== undefined) myCorners.add(c2);
+        }
+      }
+      
+      // Find edges connected to my corners that are not built
+      for (const cornerId of myCorners) {
         const adjacentEdges = GameState.cornerToEdges[cornerId] || [];
         for (const edgeId of adjacentEdges) {
           const edge = GameState.edges[edgeId];
-          if (edge && edge.owner === null) {
-            // Score this road based on where it leads
-            const connectedCorners = GameState.edgeToCorners[edgeId] || [];
-            const otherCorner = connectedCorners.find(c => c !== cornerId);
-            
-            if (otherCorner !== undefined) {
-              const cornerScore = this.scoreCorner(otherCorner);
-              if (cornerScore) {
-                availableRoads.push({
-                  edgeId: parseInt(edgeId),
-                  fromCorner: cornerId,
-                  toCorner: otherCorner,
-                  leadsToScore: cornerScore.score,
-                  leadsToTiles: cornerScore.tiles
-                });
-              }
-            }
+          if (edge && edge.owner === null && !available.includes(edgeId)) {
+            available.push(parseInt(edgeId));
           }
         }
       }
       
-      // Sort by destination score
-      availableRoads.sort((a, b) => b.leadsToScore - a.leadsToScore);
-      
-      if (availableRoads.length === 0) {
-        console.log(`${LOG_PREFIX}   No available road spots found`);
-        return [];
-      }
-      
-      console.log(`${LOG_PREFIX} 🏆 BEST ROAD OPTIONS:`);
-      console.log(`${LOG_PREFIX} `);
-      
-      for (let i = 0; i < Math.min(3, availableRoads.length); i++) {
-        const r = availableRoads[i];
-        console.log(`${LOG_PREFIX}   ${i + 1}. Edge ${r.edgeId} (Corner ${r.fromCorner} → ${r.toCorner})`);
-        console.log(`${LOG_PREFIX}      Leads to: ${r.leadsToTiles.join(', ')} (Score: ${r.leadsToScore})`);
-        console.log(`${LOG_PREFIX} `);
-      }
-      
-      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
-      
-      return availableRoads.slice(0, 3);
+      return available;
     },
     
     /**
-     * Suggest what to build based on current resources
+     * Check if we can afford something
+     */
+    canAfford(item) {
+      const r = GameState.myResources;
+      const cost = BUILD_COSTS[item];
+      if (!cost) return false;
+      
+      for (const [resource, amount] of Object.entries(cost)) {
+        if ((r[resource] || 0) < amount) return false;
+      }
+      return true;
+    },
+    
+    /**
+     * Suggest what to build based on current resources and game state
      */
     suggestBuildPriority() {
       const r = GameState.myResources;
+      const totalCards = r.wood + r.brick + r.sheep + r.wheat + r.ore;
       
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       console.log(`${LOG_PREFIX} 💰 BUILD PRIORITY ANALYSIS`);
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
-      console.log(`${LOG_PREFIX} Resources: Wood:${r.wood} Brick:${r.brick} Sheep:${r.sheep} Wheat:${r.wheat} Ore:${r.ore}`);
+      console.log(`${LOG_PREFIX} 🎴 Resources: 🪵${r.wood} 🧱${r.brick} 🐑${r.sheep} 🌾${r.wheat} �ite${r.ore} (Total: ${totalCards})`);
       console.log(`${LOG_PREFIX} `);
       
       const suggestions = [];
       
-      // City: 2 wheat + 3 ore
-      if (r.wheat >= 2 && r.ore >= 3) {
-        suggestions.push({ action: 'Build City', priority: 1, reason: '+1 VP and doubles resource production' });
+      // Count my buildings
+      let mySettlements = 0;
+      let myCities = 0;
+      for (const corner of Object.values(GameState.corners)) {
+        if (corner.owner === GameState.myColor) {
+          if (corner.buildingType === 1) mySettlements++;
+          if (corner.buildingType === 2) myCities++;
+        }
       }
       
-      // Settlement: 1 each of wood, brick, sheep, wheat
-      if (r.wood >= 1 && r.brick >= 1 && r.sheep >= 1 && r.wheat >= 1) {
-        suggestions.push({ action: 'Build Settlement', priority: 2, reason: '+1 VP and new resource access' });
+      // === CITY ===
+      // Priority: Very high if we have settlements to upgrade
+      if (this.canAfford('city')) {
+        const canUpgrade = GameState.availableCities.length > 0 || mySettlements > 0;
+        if (canUpgrade) {
+          suggestions.push({
+            action: '🏰 Build City',
+            priority: 10,
+            reason: '+1 VP and DOUBLES production on that spot',
+            available: GameState.availableCities.length || mySettlements
+          });
+        }
       }
       
-      // Dev Card: 1 each of sheep, wheat, ore
-      if (r.sheep >= 1 && r.wheat >= 1 && r.ore >= 1) {
-        suggestions.push({ action: 'Buy Dev Card', priority: 3, reason: 'Could be VP or useful knight' });
+      // === SETTLEMENT ===
+      // Priority: High if we have good spots
+      if (this.canAfford('settlement')) {
+        const spots = GameState.availableSettlements.length;
+        if (spots > 0 || this.calculateAvailableSettlements().length > 0) {
+          const bestSpot = this.getBestSettlementSpot();
+          suggestions.push({
+            action: '🏠 Build Settlement',
+            priority: 8,
+            reason: '+1 VP and new resource access',
+            available: spots,
+            where: bestSpot ? `Corner ${bestSpot.cornerId}` : null
+          });
+        }
       }
       
-      // Road: 1 wood + 1 brick
-      if (r.wood >= 1 && r.brick >= 1) {
-        suggestions.push({ action: 'Build Road', priority: 4, reason: 'Expand to new settlement spots' });
+      // === DEV CARD ===
+      // Priority: Medium-high, especially if we need knights or going for largest army
+      if (this.canAfford('devCard')) {
+        const knights = GameState.myDevCards.filter(c => c === 'knight').length;
+        let priority = 6;
+        let reason = 'Could be VP card or useful knight';
+        
+        if (totalCards >= 7) {
+          priority = 9; // Spend before getting robbed!
+          reason = '⚠️ Spend cards before 7 is rolled!';
+        } else if (knights >= 2) {
+          priority = 7;
+          reason = 'Push for Largest Army (2 VP)';
+        }
+        
+        suggestions.push({
+          action: '🃏 Buy Dev Card',
+          priority,
+          reason
+        });
       }
+      
+      // === ROAD ===
+      // Priority: Lower unless pushing for longest road or need expansion
+      if (this.canAfford('road')) {
+        const spots = GameState.availableRoads.length;
+        if (spots > 0 || this.calculateAvailableRoads().length > 0) {
+          let priority = 4;
+          let reason = 'Expand toward new settlement spots';
+          
+          // Check if we're close to longest road
+          // (simplified - would need actual longest road tracking)
+          if (GameState.availableSettlements.length === 0) {
+            priority = 7;
+            reason = 'No settlement spots - expand with roads first!';
+          }
+          
+          suggestions.push({
+            action: '🛤️ Build Road',
+            priority,
+            reason
+          });
+        }
+      }
+      
+      // Sort by priority
+      suggestions.sort((a, b) => b.priority - a.priority);
       
       if (suggestions.length === 0) {
         console.log(`${LOG_PREFIX}   ❌ Cannot afford anything right now`);
+        this.suggestResourceGoal(r);
       } else {
-        console.log(`${LOG_PREFIX}   📋 CAN BUILD:`);
-        for (const s of suggestions) {
-          console.log(`${LOG_PREFIX}      ${s.priority}. ${s.action} - ${s.reason}`);
+        console.log(`${LOG_PREFIX}   📋 BUILD OPTIONS (by priority):`);
+        console.log(`${LOG_PREFIX} `);
+        for (let i = 0; i < suggestions.length; i++) {
+          const s = suggestions[i];
+          const star = i === 0 ? '⭐' : '  ';
+          console.log(`${LOG_PREFIX}   ${star} ${s.action} (Priority: ${s.priority})`);
+          console.log(`${LOG_PREFIX}      ${s.reason}`);
+          if (s.where) console.log(`${LOG_PREFIX}      📍 Best spot: ${s.where}`);
+          console.log(`${LOG_PREFIX} `);
         }
       }
       
@@ -1052,6 +1446,203 @@
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
       return suggestions;
+    },
+    
+    /**
+     * Suggest what resources to aim for
+     */
+    suggestResourceGoal(r) {
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX}   🎯 SAVE FOR:`);
+      
+      // What's closest to build?
+      const missing = {
+        city: { ore: Math.max(0, 3 - r.ore), wheat: Math.max(0, 2 - r.wheat) },
+        settlement: { 
+          wood: Math.max(0, 1 - r.wood), 
+          brick: Math.max(0, 1 - r.brick),
+          sheep: Math.max(0, 1 - r.sheep),
+          wheat: Math.max(0, 1 - r.wheat)
+        },
+        devCard: {
+          sheep: Math.max(0, 1 - r.sheep),
+          wheat: Math.max(0, 1 - r.wheat),
+          ore: Math.max(0, 1 - r.ore)
+        },
+        road: { wood: Math.max(0, 1 - r.wood), brick: Math.max(0, 1 - r.brick) }
+      };
+      
+      // Count cards needed
+      const cityNeed = missing.city.ore + missing.city.wheat;
+      const settlementNeed = missing.settlement.wood + missing.settlement.brick + 
+                             missing.settlement.sheep + missing.settlement.wheat;
+      const devNeed = missing.devCard.sheep + missing.devCard.wheat + missing.devCard.ore;
+      const roadNeed = missing.road.wood + missing.road.brick;
+      
+      if (roadNeed <= 2 && roadNeed > 0) {
+        const needs = Object.entries(missing.road).filter(([,v]) => v > 0).map(([k]) => k);
+        console.log(`${LOG_PREFIX}      🛤️ Road: need ${needs.join(', ')}`);
+      }
+      if (settlementNeed <= 3 && settlementNeed > 0) {
+        const needs = Object.entries(missing.settlement).filter(([,v]) => v > 0).map(([k]) => k);
+        console.log(`${LOG_PREFIX}      🏠 Settlement: need ${needs.join(', ')}`);
+      }
+      if (devNeed <= 2 && devNeed > 0) {
+        const needs = Object.entries(missing.devCard).filter(([,v]) => v > 0).map(([k]) => k);
+        console.log(`${LOG_PREFIX}      🃏 Dev Card: need ${needs.join(', ')}`);
+      }
+      if (cityNeed <= 3 && cityNeed > 0) {
+        const needs = Object.entries(missing.city).filter(([,v]) => v > 0).map(([k]) => k);
+        console.log(`${LOG_PREFIX}      🏰 City: need ${needs.join(', ')}`);
+      }
+    },
+    
+    /**
+     * Get best available settlement spot
+     */
+    getBestSettlementSpot() {
+      const spots = GameState.availableSettlements.length > 0 
+        ? GameState.availableSettlements 
+        : this.calculateAvailableSettlements();
+      
+      let best = null;
+      let bestScore = -1;
+      
+      for (const cornerId of spots) {
+        const result = this.scoreCorner(cornerId, false);
+        if (result && result.score > bestScore) {
+          bestScore = result.score;
+          best = result;
+        }
+      }
+      
+      return best;
+    },
+    
+    /**
+     * Calculate available settlement spots (fallback)
+     */
+    calculateAvailableSettlements() {
+      const available = [];
+      
+      // Need roads leading to empty corners with distance rule
+      const myCorners = new Set();
+      
+      // Corners I can reach via my roads
+      for (const [edgeId, edge] of Object.entries(GameState.edges)) {
+        if (edge.owner === GameState.myColor) {
+          const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+          if (c1 !== undefined) myCorners.add(c1);
+          if (c2 !== undefined) myCorners.add(c2);
+        }
+      }
+      
+      for (const cornerId of myCorners) {
+        const corner = GameState.corners[cornerId];
+        if (!corner || corner.owner !== null) continue;
+        
+        // Check distance rule
+        let valid = true;
+        const neighbors = GameState.cornerToCorners[cornerId] || [];
+        for (const nId of neighbors) {
+          if (GameState.corners[nId]?.owner !== null) {
+            valid = false;
+            break;
+          }
+        }
+        
+        if (valid) {
+          available.push(parseInt(cornerId));
+        }
+      }
+      
+      return available;
+    },
+    
+    /**
+     * Suggest where to place robber
+     */
+    suggestRobberPlacement() {
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      console.log(`${LOG_PREFIX} 🦹 ROBBER PLACEMENT ANALYSIS`);
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      
+      const spots = GameState.availableRobberSpots.length > 0 
+        ? GameState.availableRobberSpots 
+        : Object.keys(GameState.tiles).map(Number);
+      
+      const scored = [];
+      
+      for (const tileId of spots) {
+        const tile = GameState.tiles[tileId];
+        if (!tile || tile.type === 0) continue; // Skip desert
+        if (tileId === GameState.robberTile) continue; // Can't place where it already is
+        
+        let score = 0;
+        let affectsMe = false;
+        let affectsOpponent = false;
+        let opponentResources = [];
+        
+        // Check who has buildings on this tile
+        const corners = GameState.tileToCorners[tileId] || [];
+        for (const cornerId of corners) {
+          const corner = GameState.corners[cornerId];
+          if (!corner || corner.owner === null) continue;
+          
+          if (corner.owner === GameState.myColor) {
+            affectsMe = true;
+            score -= 50; // Don't block ourselves!
+          } else {
+            affectsOpponent = true;
+            // Bonus for blocking opponent's good tiles
+            score += tile.probability * 10;
+            
+            // Extra bonus for cities
+            if (corner.buildingType === 2) {
+              score += 15;
+            }
+          }
+        }
+        
+        // Skip tiles that only affect us
+        if (affectsMe && !affectsOpponent) continue;
+        
+        // Bonus for high probability tiles
+        if (tile.diceNumber === 6 || tile.diceNumber === 8) score += 10;
+        if (tile.diceNumber === 5 || tile.diceNumber === 9) score += 5;
+        
+        scored.push({
+          tileId,
+          score,
+          resource: tile.resource,
+          number: tile.diceNumber,
+          probability: tile.probability,
+          affectsOpponent
+        });
+      }
+      
+      scored.sort((a, b) => b.score - a.score);
+      
+      if (scored.length === 0) {
+        console.log(`${LOG_PREFIX} ❌ No good robber spots`);
+        return [];
+      }
+      
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX} 🏆 TOP ROBBER SPOTS:`);
+      console.log(`${LOG_PREFIX} `);
+      
+      for (let i = 0; i < Math.min(3, scored.length); i++) {
+        const s = scored[i];
+        console.log(`${LOG_PREFIX}   ${i === 0 ? '⭐' : (i + 1) + '.'} Tile ${s.tileId} — ${s.resource}(${s.number})`);
+        console.log(`${LOG_PREFIX}      Blocks ${s.probability} pips of opponent production`);
+        console.log(`${LOG_PREFIX} `);
+      }
+      
+      console.log(`${LOG_PREFIX} 💡 Recommendation: Place robber on Tile ${scored[0].tileId}`);
+      console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
+      
+      return scored.slice(0, 3);
     },
     
     /**
