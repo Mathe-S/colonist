@@ -302,6 +302,52 @@
           background: rgba(255,255,255,0.1);
           color: #888;
         }
+        .ca-msg-log {
+          max-height: 150px;
+          overflow-y: auto;
+          font-family: 'Consolas', 'Monaco', monospace;
+          font-size: 10px;
+        }
+        .ca-msg-item {
+          padding: 4px 6px;
+          margin-bottom: 2px;
+          background: rgba(0,0,0,0.3);
+          border-radius: 4px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .ca-msg-item.new {
+          border-left: 2px solid #4caf50;
+        }
+        .ca-msg-type {
+          color: #4fc3f7;
+        }
+        .ca-msg-id {
+          color: #ffb74d;
+        }
+        .ca-msg-time {
+          color: #666;
+          font-size: 9px;
+        }
+        .ca-btn {
+          background: linear-gradient(135deg, #e94560 0%, #c23a51 100%);
+          border: none;
+          color: white;
+          padding: 6px 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 600;
+          margin-top: 8px;
+          width: 100%;
+        }
+        .ca-btn:hover {
+          opacity: 0.9;
+        }
+        .ca-btn-secondary {
+          background: rgba(255,255,255,0.1);
+        }
       `;
       document.head.appendChild(style);
     },
@@ -418,6 +464,9 @@
       // Opponent tracking
       html += this.renderOpponentTracking();
       
+      // Message log (for debugging)
+      html += this.renderMessageLog();
+      
       body.innerHTML = html;
     },
     
@@ -525,6 +574,101 @@
         white: '#ecf0f1'
       };
       return colors[colorName] || '#888';
+    },
+    
+    renderMessageLog() {
+      const messages = GameState.messageLog.slice(-10).reverse(); // Last 10, newest first
+      const seenTypes = GameState.seenMessageTypes?.size || 0;
+      
+      let html = `
+        <div class="ca-section">
+          <div class="ca-section-title">📨 Recent Messages (${seenTypes} types seen)</div>
+          <div class="ca-msg-log">
+      `;
+      
+      if (messages.length === 0) {
+        html += '<div class="ca-status" style="padding: 10px;">No messages yet...</div>';
+      } else {
+        for (const msg of messages) {
+          const data = msg.data;
+          const time = new Date(msg.timestamp).toLocaleTimeString();
+          
+          let typeStr = '';
+          let idStr = '';
+          let details = '';
+          
+          if (data.type && typeof data.type === 'string') {
+            typeStr = data.type;
+          } else if (data.id !== undefined && data.data?.type !== undefined) {
+            idStr = `ID:${data.id}`;
+            typeStr = `T:${data.data.type}`;
+            
+            // Add payload info
+            if (data.data.payload) {
+              if (data.data.payload.diff) {
+                const diffKeys = Object.keys(data.data.payload.diff);
+                details = `diff:[${diffKeys.join(',')}]`;
+              } else if (Array.isArray(data.data.payload)) {
+                details = `arr[${data.data.payload.length}]`;
+              } else if (typeof data.data.payload === 'object') {
+                details = Object.keys(data.data.payload).slice(0, 2).join(',');
+              }
+            }
+          } else if (data.id !== undefined) {
+            idStr = `ID:${data.id}`;
+          }
+          
+          html += `
+            <div class="ca-msg-item">
+              <div>
+                ${idStr ? `<span class="ca-msg-id">${idStr}</span> ` : ''}
+                <span class="ca-msg-type">${typeStr}</span>
+                ${details ? `<span style="color:#888"> ${details}</span>` : ''}
+              </div>
+              <span class="ca-msg-time">${time}</span>
+            </div>
+          `;
+        }
+      }
+      
+      html += `
+          </div>
+          <button class="ca-btn ca-btn-secondary" onclick="window.colonistAdvisorUI.downloadLast20()">
+            📥 Download Last 20 Messages
+          </button>
+        </div>
+      `;
+      
+      return html;
+    },
+    
+    downloadLast20() {
+      const messages = GameState.messageLog.slice(-20);
+      const data = {
+        exportedAt: new Date().toISOString(),
+        description: 'Last 20 messages for debugging',
+        gameInfo: {
+          myColor: GameState.myColor,
+          players: GameState.players,
+          currentAction: GameState.currentAction,
+          currentTurnColor: GameState.currentTurnColor
+        },
+        messageCount: messages.length,
+        messages: messages
+      };
+      
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `colonist-last20-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log(`${LOG_PREFIX} 📥 Downloaded last ${messages.length} messages`);
     },
 
     renderBuildOptions() {
@@ -888,6 +1032,7 @@
     // Tracking
     diceHistory: [],
     messageLog: [],
+    seenMessageTypes: new Set(),  // Track unique message types to avoid duplicates
     
     reset() {
       this.myColor = null;
@@ -920,6 +1065,7 @@
       this.playerVP = {};
       this.diceHistory = [];
       this.messageLog = [];
+      this.seenMessageTypes = new Set();
     }
   };
 
@@ -1073,6 +1219,110 @@
   };
 
   // ============================================================================
+  // Message Deduplication Helpers
+  // ============================================================================
+
+  /**
+   * Check if a message is empty or contains minimal data
+   * Filters out messages that are just numbers (like 2, 4) or empty objects
+   */
+  function isEmptyMessage(data) {
+    if (data === null || data === undefined) return true;
+    
+    // Simple primitive values (numbers, strings) are considered empty
+    if (typeof data !== 'object') return true;
+    
+    // Empty objects
+    if (Object.keys(data).length === 0) return true;
+    
+    // Check for minimal data structures that don't contain useful info
+    // Messages with just a number (like { data: 2 }) are empty
+    if (Object.keys(data).length === 1 && typeof data.data === 'number') {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Generate a unique key for a message type to identify duplicates
+   * This key is based on the message structure, not the content
+   */
+  function getMessageTypeKey(data) {
+    if (!data || typeof data !== 'object') {
+      return `primitive_${typeof data}_${data}`;
+    }
+    
+    // Handle messages with type property (like "Connected", "SessionEstablished")
+    if (data.type && typeof data.type === 'string') {
+      return `type_string_${data.type}`;
+    }
+    
+    // Handle messages with id and data.type structure
+    if (data.id !== undefined && data.data && data.data.type !== undefined) {
+      const id = data.id;
+      const type = data.data.type;
+      // Include payload structure if it exists
+      const hasPayload = data.data.payload !== undefined && data.data.payload !== null;
+      const payloadKeys = hasPayload && typeof data.data.payload === 'object' && !Array.isArray(data.data.payload)
+        ? Object.keys(data.data.payload).sort().join(',')
+        : (hasPayload && Array.isArray(data.data.payload) ? 'array' : 'no_payload');
+      return `id_${id}_type_${type}_payload_${payloadKeys}`;
+    }
+    
+    // Handle messages with just id
+    if (data.id !== undefined) {
+      return `id_only_${data.id}`;
+    }
+    
+    // Handle messages with type number (in data.data.type)
+    if (data.data && typeof data.data === 'object' && data.data.type !== undefined) {
+      return `nested_type_${data.data.type}`;
+    }
+    
+    // Fallback: use structure signature
+    const keys = Object.keys(data).sort();
+    const structure = keys.map(k => {
+      const val = data[k];
+      if (typeof val === 'object' && val !== null) {
+        return `${k}:${Object.keys(val).sort().join(',')}`;
+      }
+      return `${k}:${typeof val}`;
+    }).join('|');
+    
+    return `structure_${structure}`;
+  }
+
+  /**
+   * Deduplicate an array of messages, keeping only the first occurrence of each type
+   * Also filters out empty messages
+   */
+  function deduplicateMessages(messages) {
+    const seen = new Set();
+    const deduplicated = [];
+    
+    for (const msg of messages) {
+      const data = msg.data || msg;
+      
+      // Skip empty messages
+      if (isEmptyMessage(data)) {
+        continue;
+      }
+      
+      // Generate type key
+      const typeKey = getMessageTypeKey(data);
+      
+      // Only keep first occurrence
+      if (!seen.has(typeKey)) {
+        seen.add(typeKey);
+        deduplicated.push(msg);
+      }
+    }
+    
+    return deduplicated;
+  }
+
+  // ============================================================================
   // Message Parser
   // ============================================================================
 
@@ -1083,14 +1333,30 @@
       // Store raw message (but skip heartbeats to save memory)
       const isHeartbeat = decoded.id === 136 || decoded.id === '136';
       if (!isHeartbeat) {
-        GameState.messageLog.push({
-          timestamp: Date.now(),
-          data: decoded
-        });
-        
-        // Debug logging (only in debug mode)
-        if (DEBUG) {
-          console.log(`${LOG_PREFIX} 📥 Received - type: ${decoded.type}, id: ${decoded.id}`);
+        // Skip empty messages
+        if (isEmptyMessage(decoded)) {
+          if (DEBUG) {
+            console.log(`${LOG_PREFIX} ⏭️ Skipping empty message:`, decoded);
+          }
+        } else {
+          // Generate unique key for this message type
+          const typeKey = getMessageTypeKey(decoded);
+          
+          // Only log if we haven't seen this message type before
+          if (!GameState.seenMessageTypes.has(typeKey)) {
+            GameState.seenMessageTypes.add(typeKey);
+            GameState.messageLog.push({
+              timestamp: Date.now(),
+              data: decoded
+            });
+            
+            // Debug logging (only in debug mode)
+            if (DEBUG) {
+              console.log(`${LOG_PREFIX} 📥 New message type logged - key: ${typeKey}, type: ${decoded.type}, id: ${decoded.id}`);
+            }
+          } else if (DEBUG) {
+            console.log(`${LOG_PREFIX} ⏭️ Skipping duplicate message type: ${typeKey}`);
+          }
         }
       }
 
@@ -2755,7 +3021,8 @@
             result = GameState.messageLog;
             break;
           case 'saveMessages':
-            // Trigger download from content script
+            // Deduplicate messages before saving
+            const deduplicatedMessages = deduplicateMessages(GameState.messageLog);
             const data = {
               exportedAt: new Date().toISOString(),
               gameInfo: {
@@ -2764,8 +3031,9 @@
                 isSetupPhase: GameState.isSetupPhase,
                 completedTurns: GameState.completedTurns
               },
-              messageCount: GameState.messageLog.length,
-              messages: GameState.messageLog
+              messageCount: deduplicatedMessages.length,
+              originalCount: GameState.messageLog.length,
+              messages: deduplicatedMessages
             };
             const json = JSON.stringify(data, null, 2);
             const blob = new Blob([json], { type: 'application/json' });
@@ -2777,8 +3045,8 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            console.log(`${LOG_PREFIX} 💾 Saved ${GameState.messageLog.length} messages`);
-            result = { saved: GameState.messageLog.length };
+            console.log(`${LOG_PREFIX} 💾 Saved ${deduplicatedMessages.length} unique messages (from ${GameState.messageLog.length} total)`);
+            result = { saved: deduplicatedMessages.length, originalCount: GameState.messageLog.length };
             break;
           case 'checkCorner':
             const id = args?.[0];
@@ -2814,8 +3082,10 @@
       reset: () => GameState.reset(),
       debug: { MessageParser, BoardBuilder, Advisor },
       
-      // Save all messages to a JSON file
+      // Save all messages to a JSON file (deduplicated)
       saveMessages: () => {
+        // Deduplicate messages before saving
+        const deduplicatedMessages = deduplicateMessages(GameState.messageLog);
         const data = {
           exportedAt: new Date().toISOString(),
           gameInfo: {
@@ -2824,8 +3094,9 @@
             isSetupPhase: GameState.isSetupPhase,
             completedTurns: GameState.completedTurns
           },
-          messageCount: GameState.messageLog.length,
-          messages: GameState.messageLog
+          messageCount: deduplicatedMessages.length,
+          originalCount: GameState.messageLog.length,
+          messages: deduplicatedMessages
         };
         
         const json = JSON.stringify(data, null, 2);
@@ -2840,7 +3111,7 @@
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        console.log(`${LOG_PREFIX} 💾 Saved ${GameState.messageLog.length} messages to file`);
+        console.log(`${LOG_PREFIX} 💾 Saved ${deduplicatedMessages.length} unique messages (from ${GameState.messageLog.length} total) to file`);
         return data;
       },
       
