@@ -1197,6 +1197,37 @@
       getMessages: () => GameState.messageLog,
       reset: () => GameState.reset(),
       debug: { MessageParser, BoardBuilder, Advisor },
+      
+      // Save all messages to a JSON file
+      saveMessages: () => {
+        const data = {
+          exportedAt: new Date().toISOString(),
+          gameInfo: {
+            myColor: GameState.myColor,
+            players: GameState.players,
+            isSetupPhase: GameState.isSetupPhase,
+            completedTurns: GameState.completedTurns
+          },
+          messageCount: GameState.messageLog.length,
+          messages: GameState.messageLog
+        };
+        
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `colonist-messages-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log(`${LOG_PREFIX} 💾 Saved ${GameState.messageLog.length} messages to file`);
+        return data;
+      },
+      
       // Debug: check corner adjacency
       checkCorner: (id) => {
         const corner = GameState.corners[id];
