@@ -468,6 +468,9 @@
       html += this.renderMessageLog();
       
       body.innerHTML = html;
+      
+      // Attach event listeners after rendering
+      this.attachEventListeners();
     },
     
     renderStrategicRecommendation() {
@@ -633,13 +636,21 @@
       
       html += `
           </div>
-          <button class="ca-btn ca-btn-secondary" onclick="window.colonistAdvisorUI.downloadLast20()">
+          <button class="ca-btn ca-btn-secondary" id="ca-download-last20-btn">
             📥 Download Last 20 Messages
           </button>
         </div>
       `;
       
       return html;
+    },
+    
+    // Called after render to attach event listeners
+    attachEventListeners() {
+      const downloadBtn = document.getElementById('ca-download-last20-btn');
+      if (downloadBtn) {
+        downloadBtn.onclick = () => this.downloadLast20();
+      }
     },
     
     downloadLast20() {
