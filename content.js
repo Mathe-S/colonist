@@ -457,39 +457,39 @@
     handleIdMessage(msg) {
       const { id, data } = msg;
       
-      // ID 136 = timestamp/heartbeat - ignore unless debugging
-      if (id === 136 || id === '136') {
-        if (LOG_HEARTBEATS) console.log(`${LOG_PREFIX} 💓 Heartbeat: ${data?.timestamp}`);
+      // Heartbeat messages - check by data structure (only has timestamp)
+      if (data?.timestamp && Object.keys(data).length === 1) {
+        if (LOG_HEARTBEATS) console.log(`${LOG_PREFIX} 💓 Heartbeat: ${data.timestamp}`);
         return { isHeartbeat: true };
       }
       
-      // ID 130 messages contain game updates wrapped with type/payload
-      if (id === 130 || id === '130') {
-        // Type 91 = Game state diff (most common)
-        if (data?.type === 91 && data?.payload?.diff) {
-          this.parseDiffUpdate(data.payload.diff);
-          return { isGameUpdate: true };
-        }
+      // Handle ANY id with data.type (works for bot games id=130 and 1v1 games id="133","139",etc.)
+      if (data?.type !== undefined) {
+        const msgType = data.type;
         
-        // Type 4 = Full game state  
-        if (data?.type === 4 && data?.payload) {
-          console.log(`${LOG_PREFIX} 🎮 GAME STARTED`);
+        // Type 4 = Full game state (game started)
+        if (msgType === 4 && data.payload) {
+          console.log(`${LOG_PREFIX} 🎮 GAME STARTED (id=${id}, type=${msgType})`);
           this.parseFullGameState(data.payload);
           return { isGameStart: true };
         }
         
-        // Other types with payload.diff
-        if (data?.payload?.diff) {
+        // Type 91 = Game state diff
+        if (msgType === 91 && data.payload?.diff) {
           this.parseDiffUpdate(data.payload.diff);
           return { isGameUpdate: true };
         }
-      }
-      
-      // Check if data contains type 4 (game start might be wrapped)
-      if (data?.type === 4 && data?.payload) {
-        console.log(`${LOG_PREFIX} 🎮 GAME STARTED - Parsing full state...`);
-        this.parseFullGameState(data.payload);
-        return { isGameStart: true };
+        
+        // Any other type with payload.diff (state updates)
+        if (data.payload?.diff) {
+          this.parseDiffUpdate(data.payload.diff);
+          return { isGameUpdate: true };
+        }
+        
+        // Log unhandled types for debugging
+        if (DEBUG) {
+          console.log(`${LOG_PREFIX} 📨 Unhandled: id=${id}, type=${msgType}`);
+        }
       }
       
       return {};
