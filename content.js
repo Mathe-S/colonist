@@ -10,6 +10,7 @@
   const LOG_PREFIX = '[Colonist Advisor]';
   const DEBUG = false;  // Set to true for verbose logging
   const LOG_HEARTBEATS = false;  // Set to true to see heartbeat messages
+  const SHOW_UI = true;  // Set to true to show overlay UI
 
   // ============================================================================
   // Constants - Game Enums
@@ -71,6 +72,532 @@
     2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
     7: 6,
     8: 5, 9: 4, 10: 3, 11: 2, 12: 1
+  };
+
+  // ============================================================================
+  // UI Overlay
+  // ============================================================================
+
+  const AdvisorUI = {
+    container: null,
+    isVisible: true,
+    isMinimized: false,
+
+    init() {
+      if (!SHOW_UI) return;
+      this.injectStyles();
+      this.createContainer();
+      this.createToggleButton();
+      console.log(`${LOG_PREFIX} 🎨 UI initialized`);
+    },
+
+    injectStyles() {
+      const style = document.createElement('style');
+      style.textContent = `
+        #colonist-advisor-toggle {
+          position: fixed;
+          top: 10px;
+          right: 10px;
+          z-index: 999999;
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          border: 2px solid #e94560;
+          border-radius: 8px;
+          padding: 8px 14px;
+          color: #fff;
+          font-family: 'Segoe UI', system-ui, sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
+          transition: all 0.2s ease;
+        }
+        #colonist-advisor-toggle:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+        }
+        #colonist-advisor-container {
+          position: fixed;
+          top: 50px;
+          right: 10px;
+          width: 320px;
+          max-height: calc(100vh - 70px);
+          z-index: 999998;
+          background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
+          border: 1px solid #e94560;
+          border-radius: 12px;
+          font-family: 'Segoe UI', system-ui, sans-serif;
+          font-size: 12px;
+          color: #e0e0e0;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+          overflow: hidden;
+          transition: all 0.3s ease;
+        }
+        #colonist-advisor-container.minimized {
+          max-height: 40px;
+        }
+        #colonist-advisor-container.hidden {
+          transform: translateX(350px);
+          opacity: 0;
+          pointer-events: none;
+        }
+        .ca-header {
+          background: linear-gradient(90deg, #e94560 0%, #c23a51 100%);
+          padding: 10px 14px;
+          font-weight: 700;
+          font-size: 14px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          cursor: pointer;
+        }
+        .ca-header-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .ca-header-controls {
+          display: flex;
+          gap: 8px;
+        }
+        .ca-header-btn {
+          background: rgba(255,255,255,0.2);
+          border: none;
+          color: white;
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .ca-header-btn:hover {
+          background: rgba(255,255,255,0.3);
+        }
+        .ca-body {
+          padding: 12px;
+          overflow-y: auto;
+          max-height: calc(100vh - 140px);
+        }
+        .ca-section {
+          margin-bottom: 14px;
+        }
+        .ca-section:last-child {
+          margin-bottom: 0;
+        }
+        .ca-section-title {
+          font-weight: 600;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #e94560;
+          margin-bottom: 8px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .ca-resources {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .ca-resource {
+          background: rgba(255,255,255,0.08);
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .ca-resource.wood { border-left: 3px solid #4a7c4e; }
+        .ca-resource.brick { border-left: 3px solid #c45c3e; }
+        .ca-resource.sheep { border-left: 3px solid #8bc34a; }
+        .ca-resource.wheat { border-left: 3px solid #ffc107; }
+        .ca-resource.ore { border-left: 3px solid #78909c; }
+        .ca-suggestion {
+          background: rgba(255,255,255,0.05);
+          border-radius: 8px;
+          padding: 10px;
+          margin-bottom: 8px;
+          border-left: 3px solid #4fc3f7;
+        }
+        .ca-suggestion.top {
+          border-left-color: #ffd700;
+          background: rgba(255, 215, 0, 0.08);
+        }
+        .ca-suggestion-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 4px;
+        }
+        .ca-suggestion-title {
+          font-weight: 600;
+          color: #fff;
+        }
+        .ca-suggestion-score {
+          background: #e94560;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-size: 10px;
+          font-weight: 700;
+        }
+        .ca-suggestion-detail {
+          font-size: 11px;
+          color: #aaa;
+        }
+        .ca-build-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px;
+          background: rgba(255,255,255,0.05);
+          border-radius: 6px;
+          margin-bottom: 6px;
+        }
+        .ca-build-item.can-afford {
+          border-left: 3px solid #4caf50;
+        }
+        .ca-build-item.cannot-afford {
+          border-left: 3px solid #666;
+          opacity: 0.6;
+        }
+        .ca-build-name {
+          font-weight: 500;
+        }
+        .ca-build-cost {
+          font-size: 10px;
+          color: #888;
+        }
+        .ca-status {
+          text-align: center;
+          padding: 20px;
+          color: #666;
+          font-style: italic;
+        }
+        .ca-turn-indicator {
+          padding: 8px 12px;
+          border-radius: 6px;
+          text-align: center;
+          font-weight: 600;
+          margin-bottom: 12px;
+        }
+        .ca-turn-indicator.my-turn {
+          background: linear-gradient(90deg, #4caf50 0%, #388e3c 100%);
+          color: white;
+        }
+        .ca-turn-indicator.waiting {
+          background: rgba(255,255,255,0.1);
+          color: #888;
+        }
+      `;
+      document.head.appendChild(style);
+    },
+
+    createToggleButton() {
+      const btn = document.createElement('button');
+      btn.id = 'colonist-advisor-toggle';
+      btn.innerHTML = '🎯 Advisor';
+      btn.onclick = () => this.toggle();
+      document.body.appendChild(btn);
+    },
+
+    createContainer() {
+      const container = document.createElement('div');
+      container.id = 'colonist-advisor-container';
+      container.innerHTML = `
+        <div class="ca-header" onclick="window.colonistAdvisorUI.toggleMinimize()">
+          <div class="ca-header-title">
+            <span>🎯</span>
+            <span>Colonist Advisor</span>
+          </div>
+          <div class="ca-header-controls">
+            <button class="ca-header-btn" onclick="event.stopPropagation(); window.colonistAdvisorUI.refresh()">🔄</button>
+            <button class="ca-header-btn" onclick="event.stopPropagation(); window.colonistAdvisorUI.toggle()">✕</button>
+          </div>
+        </div>
+        <div class="ca-body">
+          <div class="ca-status">Waiting for game to start...</div>
+        </div>
+      `;
+      document.body.appendChild(container);
+      this.container = container;
+      
+      // Expose to window for onclick handlers
+      window.colonistAdvisorUI = this;
+    },
+
+    toggle() {
+      this.isVisible = !this.isVisible;
+      if (this.container) {
+        this.container.classList.toggle('hidden', !this.isVisible);
+      }
+    },
+
+    toggleMinimize() {
+      this.isMinimized = !this.isMinimized;
+      if (this.container) {
+        this.container.classList.toggle('minimized', this.isMinimized);
+      }
+    },
+
+    refresh() {
+      this.update();
+    },
+
+    update() {
+      if (!this.container || !SHOW_UI) return;
+      
+      const body = this.container.querySelector('.ca-body');
+      if (!body) return;
+      
+      // Check if game is active
+      if (!GameState.myColor) {
+        body.innerHTML = '<div class="ca-status">Waiting for game to start...</div>';
+        return;
+      }
+      
+      let html = '';
+      
+      // Turn indicator
+      const isMyTurn = GameState.currentTurnColor === GameState.myColor;
+      const turnClass = isMyTurn ? 'my-turn' : 'waiting';
+      const turnText = isMyTurn ? "🎲 YOUR TURN" : `Waiting for ${PLAYER_COLORS[GameState.currentTurnColor] || 'opponent'}...`;
+      html += `<div class="ca-turn-indicator ${turnClass}">${turnText}</div>`;
+      
+      // Resources section
+      const r = GameState.myResources;
+      html += `
+        <div class="ca-section">
+          <div class="ca-section-title">📦 My Resources</div>
+          <div class="ca-resources">
+            <div class="ca-resource wood">🪵 ${r.wood}</div>
+            <div class="ca-resource brick">🧱 ${r.brick}</div>
+            <div class="ca-resource sheep">🐑 ${r.sheep}</div>
+            <div class="ca-resource wheat">🌾 ${r.wheat}</div>
+            <div class="ca-resource ore">�ite ${r.ore}</div>
+          </div>
+        </div>
+      `;
+      
+      // Build options
+      html += this.renderBuildOptions();
+      
+      // Current action suggestions
+      const action = GameState.currentAction;
+      if (isMyTurn) {
+        if (action === 'place_settlement' || action === 1) {
+          html += this.renderSettlementSuggestions();
+        } else if (action === 'place_road' || action === 3) {
+          html += this.renderRoadSuggestions();
+        } else if (action === 'place_robber' || action === 24) {
+          html += this.renderRobberSuggestions();
+        } else if (action === 'main_turn' || action === 7 || action === 0) {
+          html += this.renderSettlementSuggestions();
+          html += this.renderRoadSuggestions();
+        }
+      }
+      
+      body.innerHTML = html;
+    },
+
+    renderBuildOptions() {
+      const canAffordRoad = Advisor.canAfford('road');
+      const canAffordSettlement = Advisor.canAfford('settlement');
+      const canAffordCity = Advisor.canAfford('city');
+      const canAffordDev = Advisor.canAfford('devCard');
+      
+      return `
+        <div class="ca-section">
+          <div class="ca-section-title">🔨 Build Options</div>
+          <div class="ca-build-item ${canAffordCity ? 'can-afford' : 'cannot-afford'}">
+            <div>
+              <div class="ca-build-name">🏰 City</div>
+              <div class="ca-build-cost">2 wheat, 3 ore</div>
+            </div>
+            <div>${canAffordCity ? '✅' : '❌'}</div>
+          </div>
+          <div class="ca-build-item ${canAffordSettlement ? 'can-afford' : 'cannot-afford'}">
+            <div>
+              <div class="ca-build-name">🏠 Settlement</div>
+              <div class="ca-build-cost">1 each: wood, brick, sheep, wheat</div>
+            </div>
+            <div>${canAffordSettlement ? '✅' : '❌'}</div>
+          </div>
+          <div class="ca-build-item ${canAffordDev ? 'can-afford' : 'cannot-afford'}">
+            <div>
+              <div class="ca-build-name">🃏 Dev Card</div>
+              <div class="ca-build-cost">1 each: sheep, wheat, ore</div>
+            </div>
+            <div>${canAffordDev ? '✅' : '❌'}</div>
+          </div>
+          <div class="ca-build-item ${canAffordRoad ? 'can-afford' : 'cannot-afford'}">
+            <div>
+              <div class="ca-build-name">🛤️ Road</div>
+              <div class="ca-build-cost">1 wood, 1 brick</div>
+            </div>
+            <div>${canAffordRoad ? '✅' : '❌'}</div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderSettlementSuggestions() {
+      const useServer = GameState.availableSettlements.length > 0;
+      const spots = useServer ? GameState.availableSettlements : Object.keys(GameState.corners);
+      
+      const scored = [];
+      for (const cornerId of spots.slice(0, 20)) { // Limit for performance
+        const result = Advisor.scoreCorner(cornerId, useServer);
+        if (result) scored.push(result);
+      }
+      scored.sort((a, b) => b.score - a.score);
+      
+      if (scored.length === 0) {
+        return `
+          <div class="ca-section">
+            <div class="ca-section-title">🏠 Settlement Spots</div>
+            <div class="ca-status">No spots available</div>
+          </div>
+        `;
+      }
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">🏠 Best Settlement Spots</div>`;
+      
+      for (let i = 0; i < Math.min(3, scored.length); i++) {
+        const s = scored[i];
+        const isTop = i === 0;
+        html += `
+          <div class="ca-suggestion ${isTop ? 'top' : ''}">
+            <div class="ca-suggestion-header">
+              <span class="ca-suggestion-title">${isTop ? '⭐' : ''} Corner ${s.cornerId}</span>
+              <span class="ca-suggestion-score">${s.score}</span>
+            </div>
+            <div class="ca-suggestion-detail">
+              ${s.tiles.join(', ')}<br>
+              ${s.resourceDiversity.join(', ')} • ${s.totalProbability} pips
+            </div>
+          </div>
+        `;
+      }
+      
+      html += '</div>';
+      return html;
+    },
+
+    renderRoadSuggestions() {
+      const roads = Advisor.suggestRoadPlacement ? 
+        (() => { 
+          // Suppress console output
+          const origLog = console.log;
+          console.log = () => {};
+          const result = Advisor.calculateAvailableRoads();
+          console.log = origLog;
+          return result;
+        })() : [];
+      
+      if (roads.length === 0) {
+        return '';
+      }
+      
+      // Score roads
+      const scored = [];
+      for (const edgeId of roads.slice(0, 10)) {
+        const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+        let bestScore = 0;
+        let bestCorner = null;
+        
+        for (const cid of [c1, c2]) {
+          if (cid !== undefined && GameState.corners[cid]?.owner === null) {
+            const cs = Advisor.scoreCorner(cid, false);
+            if (cs && cs.score > bestScore) {
+              bestScore = cs.score;
+              bestCorner = cs;
+            }
+          }
+        }
+        
+        if (bestCorner) {
+          scored.push({ edgeId, score: Math.round(bestScore * 0.4), leadsTo: bestCorner });
+        }
+      }
+      scored.sort((a, b) => b.score - a.score);
+      
+      if (scored.length === 0) return '';
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">🛤️ Best Roads</div>`;
+      
+      for (let i = 0; i < Math.min(2, scored.length); i++) {
+        const r = scored[i];
+        const isTop = i === 0;
+        html += `
+          <div class="ca-suggestion ${isTop ? 'top' : ''}">
+            <div class="ca-suggestion-header">
+              <span class="ca-suggestion-title">${isTop ? '⭐' : ''} Edge ${r.edgeId}</span>
+              <span class="ca-suggestion-score">${r.score}</span>
+            </div>
+            <div class="ca-suggestion-detail">
+              Leads to: ${r.leadsTo.tiles.join(', ')}
+            </div>
+          </div>
+        `;
+      }
+      
+      html += '</div>';
+      return html;
+    },
+
+    renderRobberSuggestions() {
+      const spots = GameState.availableRobberSpots;
+      if (spots.length === 0) return '';
+      
+      const scored = [];
+      for (const tileId of spots) {
+        const tile = GameState.tiles[tileId];
+        if (!tile || tile.type === 0) continue;
+        
+        let score = 0;
+        const corners = GameState.tileToCorners[tileId] || [];
+        for (const cid of corners) {
+          const c = GameState.corners[cid];
+          if (c && c.owner && c.owner !== GameState.myColor) {
+            score += tile.probability * 10;
+            if (c.buildingType === 2) score += 15;
+          } else if (c && c.owner === GameState.myColor) {
+            score -= 50;
+          }
+        }
+        
+        if (score > 0) {
+          scored.push({ tileId, score, resource: tile.resource, number: tile.diceNumber });
+        }
+      }
+      scored.sort((a, b) => b.score - a.score);
+      
+      if (scored.length === 0) return '';
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">🦹 Robber Placement</div>`;
+      
+      for (let i = 0; i < Math.min(2, scored.length); i++) {
+        const r = scored[i];
+        html += `
+          <div class="ca-suggestion ${i === 0 ? 'top' : ''}">
+            <div class="ca-suggestion-header">
+              <span class="ca-suggestion-title">${i === 0 ? '⭐' : ''} Tile ${r.tileId}</span>
+              <span class="ca-suggestion-score">${r.score}</span>
+            </div>
+            <div class="ca-suggestion-detail">
+              ${r.resource} (${r.number}) - blocks opponent
+            </div>
+          </div>
+        `;
+      }
+      
+      html += '</div>';
+      return html;
+    }
   };
 
   // ============================================================================
@@ -511,6 +1038,7 @@
             if (GameState.currentAction === 'place_settlement' || GameState.currentAction === 1) {
               setTimeout(() => Advisor.suggestInitialPlacement(), 50);
             }
+            AdvisorUI.update();
           }
           return { isAvailableSpots: true };
         }
@@ -524,6 +1052,7 @@
             if (GameState.currentAction === 'place_road' || GameState.currentAction === 3) {
               setTimeout(() => Advisor.suggestRoadPlacement(), 50);
             }
+            AdvisorUI.update();
           }
           return { isAvailableSpots: true };
         }
@@ -632,6 +1161,9 @@
       if (GameState.isSetupPhase && GameState.currentTurnColor === GameState.myColor) {
         setTimeout(() => Advisor.suggestInitialPlacement(), 100);
       }
+      
+      // Update UI
+      setTimeout(() => AdvisorUI.update(), 150);
     },
     
     parseGameState(gs) {
@@ -798,6 +1330,9 @@
         GameState.diceHistory.push(roll);
         console.log(`${LOG_PREFIX} 🎲 Dice rolled: ${diff.diceState.dice1} + ${diff.diceState.dice2} = ${roll}`);
       }
+      
+      // Update UI after processing diff
+      AdvisorUI.update();
     },
     
     countResources(cards) {
@@ -1741,6 +2276,9 @@
 
   function init() {
     console.log(`${LOG_PREFIX} 🚀 Colonist Advisor v1.0 starting...`);
+    
+    // Initialize UI overlay
+    AdvisorUI.init();
     
     // Listen for messages from injected script
     window.addEventListener('message', (event) => {
