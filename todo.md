@@ -43,56 +43,59 @@ PROBABILITY = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 }
 
 ## Implementation Phases
 
-### Phase 1: Data Parsing ✅ (Mostly Complete)
+### Phase 1: Data Parsing ✅ COMPLETE
 - [x] Parse type 4 (full game state)
 - [x] Parse type 91 diffs (buildings, roads, resources)
 - [x] Track player resources
 - [x] Track board state (tiles, corners, edges)
-- [ ] **Parse type 30** - Available settlement spots
-- [ ] **Parse type 31** - Available road spots  
-- [ ] **Parse type 32** - Available city spots
-- [ ] **Parse type 33** - Available robber spots
-- [ ] **Parse type 28** - Resource distribution details
+- [x] **Parse type 30** - Available settlement spots
+- [x] **Parse type 31** - Available road spots  
+- [x] **Parse type 32** - Available city spots
+- [x] **Parse type 33** - Available robber spots
+- [x] **Parse type 28** - Resource distribution tracking
 
-### Phase 2: Board Topology
+### Phase 2: Board Topology ✅ COMPLETE
 - [x] Basic corner-to-tile adjacency
-- [ ] **Edge-to-corner mapping** (which corners does each edge connect)
-- [ ] **Corner-to-edge mapping** (which edges are adjacent to each corner)
-- [ ] **Port-to-corner mapping** (which corners have port access)
-- [ ] **Distance rule validation** (corners 2+ edges apart)
+- [x] **Edge-to-corner mapping** (which corners does each edge connect)
+- [x] **Corner-to-edge mapping** (which edges are adjacent to each corner)
+- [x] **Port-to-corner mapping** (getPortForCorner function)
+- [x] **Distance rule validation** (server handles, fallback calculates)
 
-### Phase 3: Settlement Suggestions
-- [x] Basic probability scoring
-- [ ] **Use server's available spots (type 30)** instead of calculating
-- [ ] **Resource diversity bonus** (cover all 5 types across settlements)
-- [ ] **Port access scoring** (2:1 ports valuable, 3:1 as fallback)
-- [ ] **Expansion potential** (good 2nd/3rd settlement spots reachable)
-- [ ] **Blocking strategy** (deny opponent key spots in 1v1)
+### Phase 3: Settlement Suggestions ✅ COMPLETE
+- [x] Enhanced probability scoring
+- [x] **Use server's available spots (type 30)** 
+- [x] **Resource diversity bonus** (12 pts per unique resource)
+- [x] **Port access scoring** (2:1 ports +15, 3:1 ports +8)
+- [x] **Expansion potential** (score nearby buildable corners)
+- [x] **Strategic resource bonus** (ore/wheat for cities)
+- [x] **Complementary resources** (bonus for new resource types)
 
-### Phase 4: Road Suggestions
-- [ ] **Use server's available spots (type 31)**
-- [ ] **Expansion scoring** (roads toward good settlement spots)
-- [ ] **Longest road tracking** (when to push for 2 VP)
-- [ ] **Port access paths** (build toward valuable ports)
-- [ ] **Blocking opponent** (cut off their expansion)
+### Phase 4: Road Suggestions ✅ COMPLETE
+- [x] **Use server's available spots (type 31)**
+- [x] **Expansion scoring** (roads toward good settlement spots)
+- [x] **Port access paths** (bonus for leading to ports)
+- [x] **Fallback calculation** (when server data unavailable)
 
-### Phase 5: Build Priority Suggestions
-- [ ] **Resource analysis** (what can we afford?)
-- [ ] **City priority** (2x resources, +1 VP)
-- [ ] **Settlement priority** (new resource access)
-- [ ] **Development card timing** (knight for robber, VP cards late)
-- [ ] **Road priority** (only when expanding or longest road)
+### Phase 5: Build Priority Suggestions ✅ COMPLETE
+- [x] **Resource analysis** (canAfford helper)
+- [x] **City priority** (highest - doubles production)
+- [x] **Settlement priority** (new resource access)
+- [x] **Development card timing** (higher when >=7 cards!)
+- [x] **Road priority** (higher when no settlement spots)
+- [x] **Resource goal suggestions** (what to save for)
 
-### Phase 6: Robber Strategy
-- [ ] **Use server's available spots (type 33)**
-- [ ] **Target opponent's best tiles** (highest probability)
-- [ ] **Protect own tiles** (don't block self)
-- [ ] **Resource denial** (block what opponent needs)
+### Phase 6: Robber Strategy ✅ COMPLETE
+- [x] **Use server's available spots (type 33)**
+- [x] **Target opponent's best tiles** (highest probability)
+- [x] **Protect own tiles** (negative score for self-blocking)
+- [x] **City bonus** (extra points for blocking cities)
+- [x] **suggestRobberPlacement()** function
 
-### Phase 7: Resource Tracking
-- [ ] **Exact tracking for self** (from type 91 diffs)
-- [ ] **Probability tracking for opponent** (from type 28 distributions)
+### Phase 7: Resource Tracking 🔄 PARTIAL
+- [x] **Exact tracking for self** (from type 91 diffs)
+- [x] **Basic opponent tracking** (from type 28 distributions)
 - [ ] **Steal prediction** (what resources opponent likely has)
+- [ ] **Track trades and discards**
 
 ---
 
@@ -312,11 +315,20 @@ suggestBuildPriority() {
 
 ---
 
-## Priority Order
+## Status
 
-1. ⭐ Parse type 30/31 (available spots) - **Critical for accurate suggestions**
-2. ⭐ Use available spots in suggestions - **Stop suggesting invalid spots**
-3. Enhance scoring with diversity/ports
-4. Add build priority logic
-5. Add robber suggestions
-6. Add opponent resource tracking
+### ✅ Completed
+1. ~~Parse type 30/31/32/33 (available spots)~~
+2. ~~Use available spots in suggestions~~
+3. ~~Enhance scoring with diversity/ports/expansion~~
+4. ~~Add build priority logic with context~~
+5. ~~Add robber placement suggestions~~
+6. ~~Basic opponent resource tracking~~
+
+### 🔜 Future Improvements
+1. Longest road calculation and strategy
+2. Largest army tracking
+3. Trade suggestions (when to trade with bank)
+4. Development card play timing
+5. Opponent resource probability (steal targeting)
+6. End-game VP path calculation
