@@ -429,11 +429,11 @@
         <div class="ca-section">
           <div class="ca-section-title">📦 My Resources</div>
           <div class="ca-resources">
-            <div class="ca-resource wood">🪵 ${r.wood}</div>
-            <div class="ca-resource brick">🧱 ${r.brick}</div>
-            <div class="ca-resource sheep">🐑 ${r.sheep}</div>
-            <div class="ca-resource wheat">🌾 ${r.wheat}</div>
-            <div class="ca-resource ore">�ite ${r.ore}</div>
+            <div class="ca-resource wood">W: ${r.wood}</div>
+            <div class="ca-resource brick">B: ${r.brick}</div>
+            <div class="ca-resource sheep">S: ${r.sheep}</div>
+            <div class="ca-resource wheat">G: ${r.wheat}</div>
+            <div class="ca-resource ore">O: ${r.ore}</div>
           </div>
         </div>
       `;
@@ -526,33 +526,41 @@
     },
 
     renderOpponentTracking() {
-      const opponents = Object.entries(GameState.opponentResources)
-        .filter(([color]) => parseInt(color) !== GameState.myColor);
+      // Get all opponents (players that aren't me)
+      const opponentColors = Object.keys(GameState.players)
+        .filter(color => parseInt(color) !== GameState.myColor);
       
-      if (opponents.length === 0) return '';
+      if (opponentColors.length === 0) return '';
       
       let html = `<div class="ca-section"><div class="ca-section-title">👁️ Opponent Cards (Estimated)</div>`;
       
-      for (const [color, res] of opponents) {
+      for (const color of opponentColors) {
         const player = GameState.players[color];
         if (!player) continue;
+        
+        // Ensure opponent tracking exists
+        MessageParser.ensureOpponentTracking(parseInt(color));
+        const res = GameState.opponentResources[color] || {};
         
         const colorName = PLAYER_COLORS[color] || 'unknown';
         const vp = player.victoryPoints || 0;
         const total = res.total || 0;
-        const devCards = GameState.playerDevCards[color]?.total || 0;
-        const knightsPlayed = GameState.playerDevCards[color]?.knightsPlayed || 0;
         
-        // Build resource string
+        // Dev cards from our tracking or game state
+        const devCardsOwned = res.devCards || GameState.playerDevCards?.[color]?.total || 0;
+        const knightsPlayed = GameState.playerDevCards?.[color]?.knightsPlayed || 0;
+        
+        // Build resource string - show all resources with counts
         const resources = [];
-        if (res.wood > 0) resources.push(`🪵${res.wood}`);
-        if (res.brick > 0) resources.push(`🧱${res.brick}`);
-        if (res.sheep > 0) resources.push(`🐑${res.sheep}`);
-        if (res.wheat > 0) resources.push(`🌾${res.wheat}`);
-        if (res.ore > 0) resources.push(`�ite${res.ore}`);
+        if (res.wood > 0) resources.push(`W:${res.wood}`);
+        if (res.brick > 0) resources.push(`B:${res.brick}`);
+        if (res.sheep > 0) resources.push(`S:${res.sheep}`);
+        if (res.wheat > 0) resources.push(`G:${res.wheat}`);
+        if (res.ore > 0) resources.push(`O:${res.ore}`);
         
-        const resourceStr = resources.length > 0 ? resources.join(' ') : 'Unknown';
+        const resourceStr = resources.length > 0 ? resources.join(' ') : '(no cards tracked)';
         const vpWarning = vp >= 8 ? ' ⚠️' : '';
+        const devCardStr = devCardsOwned > 0 ? ` | 🃏${devCardsOwned}` : '';
         
         html += `
           <div style="background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; margin-bottom: 6px; border-left: 3px solid ${this.getColorCode(colorName)}">
@@ -561,11 +569,11 @@
               <span style="color: #888; font-size: 11px;">${vp} VP${vpWarning}</span>
             </div>
             <div style="font-size: 11px; color: #aaa;">
-              Cards: ~${total} | ${resourceStr}
+              ~${total} cards${devCardStr}: ${resourceStr}
             </div>
-            ${devCards > 0 || knightsPlayed > 0 ? `
+            ${knightsPlayed > 0 ? `
               <div style="font-size: 10px; color: #888; margin-top: 2px;">
-                🃏 ${devCards} held | ⚔️ ${knightsPlayed} knights
+                ⚔️ ${knightsPlayed} knights played
               </div>
             ` : ''}
           </div>
@@ -1571,6 +1579,13 @@
           return { isAvailableSpots: true };
         }
         
+        // Type 43 = Transaction (player gives/receives cards)
+        // Used for: bank trades, dev card purchases, robber steals
+        if (msgType === 43 && payload) {
+          this.parseTransaction(payload);
+          return { isTransaction: true };
+        }
+        
         // Type 91 = Game state diff
         if (msgType === 91 && data.payload?.diff) {
           this.parseDiffUpdate(data.payload.diff);
@@ -1600,23 +1615,21 @@
         const { owner, card, distributionType } = dist;
         if (!owner) continue;
         
-        // Convert card type to resource name
-        const resourceMap = { 1: 'wood', 2: 'sheep', 3: 'ore', 4: 'wheat', 5: 'brick' };
-        const resource = resourceMap[card];
+        // Use consistent resource mapping (RESOURCE_TYPES)
+        const resource = RESOURCE_TYPES[card];
         
         if (owner !== GameState.myColor) {
           // Track opponent resources (estimate)
-          if (!GameState.opponentResources[owner]) {
-            GameState.opponentResources[owner] = { 
-              wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0, 
-              total: 0,
-              lastUpdated: Date.now()
-            };
-          }
+          this.ensureOpponentTracking(owner);
           if (resource) {
             GameState.opponentResources[owner][resource]++;
             GameState.opponentResources[owner].total++;
             GameState.opponentResources[owner].lastUpdated = Date.now();
+            
+            if (DEBUG) {
+              const name = GameState.players[owner]?.username || `Player ${owner}`;
+              console.log(`${LOG_PREFIX} 📦 ${name} gained 1 ${resource}`);
+            }
           }
         }
       }
@@ -1631,13 +1644,118 @@
     trackOpponentSpend(playerColor, cost) {
       if (playerColor === GameState.myColor) return;
       
+      this.ensureOpponentTracking(playerColor);
       const opp = GameState.opponentResources[playerColor];
-      if (!opp) return;
       
       for (const [resource, amount] of Object.entries(cost)) {
         opp[resource] = Math.max(0, (opp[resource] || 0) - amount);
         opp.total = Math.max(0, (opp.total || 0) - amount);
       }
+      opp.lastUpdated = Date.now();
+    },
+    
+    /**
+     * Ensure opponent tracking object exists
+     */
+    ensureOpponentTracking(playerColor) {
+      if (!GameState.opponentResources[playerColor]) {
+        GameState.opponentResources[playerColor] = {
+          wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
+          total: 0,
+          devCards: 0,
+          lastUpdated: Date.now()
+        };
+      }
+    },
+    
+    /**
+     * Parse transaction messages (type 43)
+     * Used for: bank trades, dev card purchases, robber steals, discards
+     */
+    parseTransaction(payload) {
+      const { givingPlayer, givingCards, receivingPlayer, receivingCards } = payload;
+      
+      // Convert card arrays to resource counts
+      const cardsToResources = (cards) => {
+        const resources = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
+        for (const cardType of cards) {
+          const resource = RESOURCE_TYPES[cardType];
+          if (resource) resources[resource]++;
+        }
+        return resources;
+      };
+      
+      const givenResources = cardsToResources(givingCards || []);
+      const receivedResources = cardsToResources(receivingCards || []);
+      
+      const givingName = givingPlayer === 0 ? 'Bank' : 
+        (GameState.players[givingPlayer]?.username || `Player ${givingPlayer}`);
+      const receivingName = receivingPlayer === 0 ? 'Bank' : 
+        (GameState.players[receivingPlayer]?.username || `Player ${receivingPlayer}`);
+      
+      // Check if this is a dev card purchase (wheat: 2, ore: 3, sheep: 1)
+      const isDevCardPurchase = givenResources.wheat >= 1 && givenResources.ore >= 1 && 
+        givenResources.sheep >= 1 && receivingPlayer === 0;
+      
+      // Detect other common transactions
+      const givenTotal = Object.values(givenResources).reduce((a, b) => a + b, 0);
+      const receivedTotal = Object.values(receivedResources).reduce((a, b) => a + b, 0);
+      
+      // Log the transaction
+      if (givenTotal > 0 || receivedTotal > 0) {
+        const givenStr = Object.entries(givenResources)
+          .filter(([_, v]) => v > 0)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ');
+        const receivedStr = Object.entries(receivedResources)
+          .filter(([_, v]) => v > 0)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ');
+        
+        if (isDevCardPurchase && givingPlayer !== GameState.myColor) {
+          console.log(`${LOG_PREFIX} 🃏 ${givingName} bought a DEV CARD! (spent ${givenStr})`);
+        } else if (givenTotal > 0 && receivedTotal > 0) {
+          console.log(`${LOG_PREFIX} 🔄 Trade: ${givingName} gave ${givenStr} → ${receivingName} for ${receivedStr}`);
+        } else if (givenTotal > 0) {
+          console.log(`${LOG_PREFIX} 📤 ${givingName} gave ${givenStr} to ${receivingName}`);
+        } else if (receivedTotal > 0) {
+          console.log(`${LOG_PREFIX} 📥 ${receivingName} received ${receivedStr} from ${givingName}`);
+        }
+      }
+      
+      // Track opponent resources
+      if (givingPlayer !== GameState.myColor && givingPlayer !== 0) {
+        this.ensureOpponentTracking(givingPlayer);
+        const opp = GameState.opponentResources[givingPlayer];
+        
+        // Subtract given resources
+        for (const [resource, amount] of Object.entries(givenResources)) {
+          opp[resource] = Math.max(0, (opp[resource] || 0) - amount);
+        }
+        opp.total = Math.max(0, opp.total - givenTotal);
+        
+        // Track dev card purchases
+        if (isDevCardPurchase) {
+          opp.devCards = (opp.devCards || 0) + 1;
+        }
+        
+        opp.lastUpdated = Date.now();
+      }
+      
+      if (receivingPlayer !== GameState.myColor && receivingPlayer !== 0) {
+        this.ensureOpponentTracking(receivingPlayer);
+        const opp = GameState.opponentResources[receivingPlayer];
+        
+        // Add received resources
+        for (const [resource, amount] of Object.entries(receivedResources)) {
+          opp[resource] = (opp[resource] || 0) + amount;
+        }
+        opp.total += receivedTotal;
+        opp.lastUpdated = Date.now();
+      }
+      
+      // Update UI
+      AdvisorUI.update();
     },
     
     parseFullGameState(payload) {
@@ -1659,14 +1777,20 @@
       // Parse players
       if (playerUserStates) {
         for (const player of playerUserStates) {
-          GameState.players[player.selectedColor] = {
+          const color = player.selectedColor;
+          GameState.players[color] = {
             username: player.username,
             isBot: player.isBot,
             userId: player.userId,
-            color: player.selectedColor,
-            colorName: PLAYER_COLORS[player.selectedColor],
+            color: color,
+            colorName: PLAYER_COLORS[color],
             victoryPoints: 0
           };
+          
+          // Initialize opponent tracking for all players except me
+          if (color !== playerColor) {
+            this.ensureOpponentTracking(color);
+          }
         }
         console.log(`${LOG_PREFIX} 👥 Players:`, Object.values(GameState.players).map(p => `${p.username} (${p.colorName}${p.isBot ? ', bot' : ''})`).join(', '));
       }
@@ -2543,7 +2667,7 @@
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       console.log(`${LOG_PREFIX} 💰 BUILD PRIORITY ANALYSIS`);
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
-      console.log(`${LOG_PREFIX} 🎴 Resources: 🪵${r.wood} 🧱${r.brick} 🐑${r.sheep} 🌾${r.wheat} �ite${r.ore} (Total: ${totalCards})`);
+      console.log(`${LOG_PREFIX} 🎴 Resources: W:${r.wood} B:${r.brick} S:${r.sheep} G:${r.wheat} O:${r.ore} (Total: ${totalCards})`);
       console.log(`${LOG_PREFIX} `);
       
       const suggestions = [];
