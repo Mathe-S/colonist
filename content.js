@@ -409,13 +409,16 @@
       const body = this.container.querySelector('.ca-body');
       if (!body) return;
       
+      let html = '';
+      
       // Check if game is active
       if (!GameState.myColor) {
-        body.innerHTML = '<div class="ca-status">Waiting for game to start...</div>';
+        // Game hasn't started yet, but show corner map if we have board data
+        html += '<div class="ca-status">Waiting for game to start...</div>';
+        html += this.renderCornerMap();
+        body.innerHTML = html;
         return;
       }
-      
-      let html = '';
       
       // Turn indicator
       const isMyTurn = GameState.currentTurnColor === GameState.myColor;
@@ -478,6 +481,9 @@
           html += this.renderRobberSuggestions();
         }
       }
+      
+      // Corner map visualization (always show if we have corner data)
+      html += this.renderCornerMap();
       
       // Opponent tracking
       html += this.renderOpponentTracking();
@@ -955,6 +961,326 @@
           </div>
         `;
       }
+      
+      html += '</div>';
+      return html;
+    },
+
+    renderCornerMap() {
+      // Get all tiles
+      const allTiles = Object.entries(GameState.tiles)
+        .map(([id, tile]) => ({ id: parseInt(id), ...tile }))
+        .filter(t => t.x !== undefined && t.y !== undefined);
+      
+      // Get all corners
+      const allCorners = Object.entries(GameState.corners)
+        .map(([id, corner]) => ({ id: parseInt(id), ...corner }))
+        .filter(c => c.y !== undefined);
+      
+      if (allTiles.length === 0 && allCorners.length === 0) return '';
+      
+      // If we have tiles, render visual hex map
+      if (allTiles.length > 0) {
+        return this.renderHexMap(allTiles, allCorners);
+      }
+      
+      // Fallback to list view if no tiles
+      
+      // Separate corners into categories
+      const myCorners = [];
+      const opponentCorners = [];
+      const availableCorners = [];
+      const blockedCorners = []; // Adjacent to occupied
+      const emptyCorners = [];
+      
+      for (const corner of allCorners) {
+        if (corner.owner !== null && corner.owner !== undefined) {
+          if (corner.owner === GameState.myColor) {
+            myCorners.push(corner);
+          } else {
+            opponentCorners.push(corner);
+          }
+        } else if (GameState.availableSettlements.includes(corner.id)) {
+          availableCorners.push(corner);
+        } else {
+          // Check if blocked by adjacent settlement
+          const neighbors = GameState.cornerToCorners[corner.id] || [];
+          const isBlocked = neighbors.some(nId => {
+            const nCorner = GameState.corners[nId];
+            return nCorner && nCorner.owner !== null;
+          });
+          if (isBlocked) {
+            blockedCorners.push(corner);
+          } else {
+            emptyCorners.push(corner);
+          }
+        }
+      }
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">🗺️ Board Overview</div>`;
+      
+      // Show occupied corners first (most important)
+      if (myCorners.length > 0 || opponentCorners.length > 0) {
+        html += `<div style="margin-bottom: 12px;">`;
+        html += `<div style="font-size: 10px; font-weight: bold; color: #4caf50; margin-bottom: 6px;">📍 Your Buildings:</div>`;
+        
+        for (const corner of myCorners) {
+          const tileIds = GameState.cornerToTiles[corner.id] || [];
+          const tiles = tileIds.map(tid => {
+            const t = GameState.tiles[tid];
+            return t && t.type !== 0 ? `${t.resource}(${t.diceNumber})` : null;
+          }).filter(Boolean);
+          const building = corner.buildingType === 1 ? '🏠 Settlement' : '🏰 City';
+          const neighbors = GameState.cornerToCorners[corner.id] || [];
+          html += `
+            <div style="background: #1a3a1a; padding: 6px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #4caf50;">
+              <div style="font-weight: bold; color: #4caf50;">Corner ${corner.id} - ${building}</div>
+              <div style="font-size: 9px; color: #aaa; margin-top: 2px;">Tiles: ${tiles.join(', ') || 'none'}</div>
+              <div style="font-size: 8px; color: #666; margin-top: 2px;">Adjacent: ${neighbors.join(', ')}</div>
+            </div>
+          `;
+        }
+        
+        if (opponentCorners.length > 0) {
+          html += `<div style="font-size: 10px; font-weight: bold; color: #ff5722; margin-top: 8px; margin-bottom: 6px;">⚠️ Opponent Buildings:</div>`;
+          for (const corner of opponentCorners) {
+            const player = GameState.players[corner.owner];
+            const ownerName = player?.username || `Player ${corner.owner}`;
+            const building = corner.buildingType === 1 ? '🏠 Settlement' : '🏰 City';
+            const neighbors = GameState.cornerToCorners[corner.id] || [];
+            const tileIds = GameState.cornerToTiles[corner.id] || [];
+            const tiles = tileIds.map(tid => {
+              const t = GameState.tiles[tid];
+              return t && t.type !== 0 ? `${t.resource}(${t.diceNumber})` : null;
+            }).filter(Boolean);
+            html += `
+              <div style="background: #3a1a1a; padding: 6px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #ff5722;">
+                <div style="font-weight: bold; color: #ff5722;">Corner ${corner.id} - ${ownerName}'s ${building}</div>
+                <div style="font-size: 9px; color: #aaa; margin-top: 2px;">Tiles: ${tiles.join(', ') || 'none'}</div>
+                <div style="font-size: 8px; color: #666; margin-top: 2px;">Blocks corners: ${neighbors.join(', ')}</div>
+              </div>
+            `;
+          }
+        }
+        
+        html += `</div>`;
+      }
+      
+      // Show available settlement spots (highlighted)
+      if (availableCorners.length > 0) {
+        html += `<div style="margin-bottom: 12px;">`;
+        html += `<div style="font-size: 10px; font-weight: bold; color: #2196f3; margin-bottom: 6px;">✅ Available for Settlement (${availableCorners.length} spots):</div>`;
+        html += `<div style="max-height: 150px; overflow-y: auto;">`;
+        
+        // Show top 10 available spots with their resources
+        const scoredAvailable = availableCorners.slice(0, 10).map(corner => {
+          const tileIds = GameState.cornerToTiles[corner.id] || [];
+          const tiles = tileIds.map(tid => {
+            const t = GameState.tiles[tid];
+            return t && t.type !== 0 ? `${t.resource}(${t.diceNumber})` : null;
+          }).filter(Boolean);
+          const neighbors = GameState.cornerToCorners[corner.id] || [];
+          return { corner, tiles, neighbors };
+        });
+        
+        for (const { corner, tiles, neighbors } of scoredAvailable) {
+          html += `
+            <div style="background: #1a1a3a; padding: 5px; margin: 3px 0; border-radius: 3px; border-left: 3px solid #2196f3;">
+              <div style="font-weight: bold; color: #2196f3;">Corner ${corner.id}</div>
+              <div style="font-size: 9px; color: #aaa; margin-top: 2px;">${tiles.join(', ') || 'No resources'}</div>
+            </div>
+          `;
+        }
+        
+        if (availableCorners.length > 10) {
+          html += `<div style="font-size: 8px; color: #666; margin-top: 4px;">... and ${availableCorners.length - 10} more available spots</div>`;
+        }
+        
+        html += `</div></div>`;
+      }
+      
+      // Compact summary
+      html += `<div style="margin-top: 8px; padding: 6px; background: #1a1a1a; border-radius: 4px; font-size: 9px;">`;
+      html += `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;">`;
+      html += `<span style="color: #4caf50;">Your buildings: ${myCorners.length}</span>`;
+      html += `<span style="color: #ff5722;">Opponent buildings: ${opponentCorners.length}</span>`;
+      html += `</div>`;
+      html += `<div style="display: flex; justify-content: space-between;">`;
+      html += `<span style="color: #2196f3;">Available: ${availableCorners.length}</span>`;
+      html += `<span style="color: #888;">Blocked: ${blockedCorners.length}</span>`;
+      html += `</div>`;
+      html += `</div>`;
+      
+      html += '</div>';
+      return html;
+    },
+    
+    /**
+     * Render visual hex map like the game board
+     */
+    renderHexMap(tiles, corners) {
+      // Resource colors
+      const RESOURCE_COLORS = {
+        'desert': '#d4a574',
+        'wood': '#2d5016',
+        'brick': '#8b4513',
+        'sheep': '#90ee90',
+        'wheat': '#ffd700',
+        'ore': '#708090'
+      };
+      
+      // Resource emojis
+      const RESOURCE_EMOJIS = {
+        'desert': '🏜️',
+        'wood': '🌲',
+        'brick': '🧱',
+        'sheep': '🐑',
+        'wheat': '🌾',
+        'ore': '⛏️'
+      };
+      
+      // Group tiles by row (y coordinate)
+      const tilesByRow = {};
+      for (const tile of tiles) {
+        const y = tile.y;
+        if (!tilesByRow[y]) tilesByRow[y] = [];
+        tilesByRow[y].push(tile);
+      }
+      
+      // Sort rows by y (top to bottom)
+      const sortedRows = Object.keys(tilesByRow).map(Number).sort((a, b) => a - b);
+      
+      // Hex dimensions
+      const hexSize = 32; // Size of each hex
+      const hexWidth = hexSize * Math.sqrt(3);
+      const hexHeight = hexSize * 1.5;
+      
+      // Calculate row offsets for 3-4-5-4-3 pattern
+      const getRowOffset = (rowIndex, rowLength) => {
+        // Center shorter rows
+        const maxRowLength = 5;
+        return (maxRowLength - rowLength) * hexWidth * 0.5;
+      };
+      
+      // Calculate map dimensions
+      const maxRowLength = Math.max(...sortedRows.map(y => tilesByRow[y].length));
+      const mapWidth = maxRowLength * hexWidth + hexWidth;
+      const mapHeight = sortedRows.length * hexHeight + hexHeight;
+      
+      let html = `<div class="ca-section"><div class="ca-section-title">🗺️ Game Map</div>`;
+      html += `<div style="overflow: auto; max-height: 450px; padding: 15px; background: #0a0a0a; border-radius: 4px;">`;
+      html += `<div style="position: relative; width: ${mapWidth}px; height: ${mapHeight}px; margin: 0 auto;">`;
+      
+      // Render each row
+      sortedRows.forEach((y, rowIndex) => {
+        const rowTiles = tilesByRow[y].sort((a, b) => a.x - b.x);
+        const rowOffset = getRowOffset(rowIndex, rowTiles.length);
+        
+        rowTiles.forEach((tile, colIndex) => {
+          // Calculate screen position
+          const screenX = rowOffset + colIndex * hexWidth + hexWidth * 0.5;
+          const screenY = rowIndex * hexHeight + hexHeight * 0.5;
+          
+          const resource = tile.resource || 'desert';
+          const color = RESOURCE_COLORS[resource] || '#666';
+          const emoji = RESOURCE_EMOJIS[resource] || '⬜';
+          const diceNum = tile.diceNumber || 0;
+          const isDesert = tile.type === 0;
+          const isRobber = tile.id === GameState.robberTile;
+          
+          // Create hexagon using CSS
+          html += `
+            <div style="
+              position: absolute;
+              left: ${screenX - hexSize}px;
+              top: ${screenY - hexSize * 0.866}px;
+              width: ${hexSize * 2}px;
+              height: ${hexSize * 1.732}px;
+              background: ${color};
+              clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+              border: ${isRobber ? '3px solid #ff0000' : '2px solid #000'};
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              font-size: 10px;
+              color: ${isDesert ? '#fff' : '#000'};
+              font-weight: bold;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+              z-index: ${isRobber ? 10 : 1};
+            ">
+              <div style="font-size: 16px;">${emoji}</div>
+              ${!isDesert ? `<div style="background: rgba(255,255,255,0.8); padding: 2px 4px; border-radius: 3px; margin-top: 2px;">${diceNum}</div>` : ''}
+              ${isRobber ? `<div style="position: absolute; top: -5px; right: -5px; font-size: 20px;">🦹</div>` : ''}
+            </div>
+          `;
+        });
+      });
+      
+      // Render corners (settlements/cities)
+      for (const corner of corners) {
+        if (corner.owner === null || corner.owner === undefined) continue;
+        
+        // Find corner position from adjacent tiles
+        const tileIds = GameState.cornerToTiles[corner.id] || [];
+        if (tileIds.length === 0) continue;
+        
+        // Get tiles and find their positions
+        const cornerTiles = tileIds.map(tid => GameState.tiles[tid]).filter(t => t && t.x !== undefined && t.y !== undefined);
+        if (cornerTiles.length === 0) continue;
+        
+        // Find which row the corner is in (use the most common y coordinate)
+        const yCounts = {};
+        cornerTiles.forEach(t => { yCounts[t.y] = (yCounts[t.y] || 0) + 1; });
+        const cornerY = parseInt(Object.keys(yCounts).reduce((a, b) => yCounts[a] > yCounts[b] ? a : b));
+        const rowIndex = sortedRows.indexOf(cornerY);
+        if (rowIndex === -1) continue;
+        
+        // Get average x position
+        const avgX = cornerTiles.reduce((sum, t) => sum + t.x, 0) / cornerTiles.length;
+        const rowTiles = tilesByRow[cornerY].sort((a, b) => a.x - b.x);
+        const rowOffset = getRowOffset(rowIndex, rowTiles.length);
+        
+        // Find closest tile in row to position corner
+        const closestTile = rowTiles.reduce((closest, tile) => 
+          Math.abs(tile.x - avgX) < Math.abs(closest.x - avgX) ? tile : closest
+        );
+        const colIndex = rowTiles.indexOf(closestTile);
+        
+        const screenX = rowOffset + colIndex * hexWidth + hexWidth * 0.5;
+        const screenY = rowIndex * hexHeight + hexHeight * 0.5;
+        
+        const isMe = corner.owner === GameState.myColor;
+        const building = corner.buildingType === 1 ? '🏠' : '🏰';
+        const borderColor = isMe ? '#4caf50' : '#ff5722';
+        
+        html += `
+          <div style="
+            position: absolute;
+            left: ${screenX - 8}px;
+            top: ${screenY - 8}px;
+            width: 16px;
+            height: 16px;
+            background: ${isMe ? '#4caf50' : '#ff5722'};
+            border: 2px solid ${borderColor};
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            z-index: 20;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.8);
+          " title="Corner ${corner.id}">${building}</div>
+        `;
+      }
+      
+      html += `</div></div>`;
+      
+      // Legend
+      html += `<div style="margin-top: 8px; font-size: 9px; color: #888; line-height: 1.4;">`;
+      html += `<div><strong>Resources:</strong> 🌲 Wood | 🧱 Brick | 🐑 Sheep | 🌾 Wheat | ⛏️ Ore | 🏜️ Desert</div>`;
+      html += `<div><strong>Buildings:</strong> 🟢 🏠 = Yours | 🔴 🏠 = Opponent | 🦹 = Robber</div>`;
+      html += `</div>`;
       
       html += '</div>';
       return html;
@@ -1831,7 +2157,13 @@
         // Corners
         if (tileCornerStates) {
           for (const [id, corner] of Object.entries(tileCornerStates)) {
-            GameState.corners[id] = { ...corner, owner: null, buildingType: null };
+            // Preserve existing owner/buildingType if present, otherwise initialize to null
+            const existing = GameState.corners[id] || {};
+            GameState.corners[id] = { 
+              ...corner, 
+              owner: corner.owner !== undefined ? corner.owner : (existing.owner !== undefined ? existing.owner : null),
+              buildingType: corner.buildingType !== undefined ? corner.buildingType : (corner.type !== undefined ? corner.type : (existing.buildingType !== undefined ? existing.buildingType : null))
+            };
           }
         }
         
@@ -1960,14 +2292,20 @@
           }
           Object.assign(GameState.corners[cornerId], state);
           
-          if (state.owner !== undefined && state.buildingType !== undefined) {
-            const building = state.buildingType === 1 ? 'Settlement' : 'City';
+          // Handle both 'buildingType' and 'type' fields (some messages use 'type')
+          const buildingType = state.buildingType !== undefined ? state.buildingType : state.type;
+          if (buildingType !== undefined) {
+            GameState.corners[cornerId].buildingType = buildingType;
+          }
+          
+          if (state.owner !== undefined && buildingType !== undefined) {
+            const building = buildingType === 1 ? 'Settlement' : 'City';
             const playerName = GameState.players[state.owner]?.username || `Player ${state.owner}`;
             const cId = parseInt(cornerId);
             console.log(`${LOG_PREFIX} 🏗️ ${playerName} built ${building} at corner ${cornerId}`);
             
             // Track MY settlements for complementary suggestions
-            if (state.owner === GameState.myColor && state.buildingType === 1) {
+            if (state.owner === GameState.myColor && buildingType === 1) {
               if (!GameState.mySettlementCorners.includes(cId)) {
                 GameState.mySettlementCorners.push(cId);
                 GameState.setupPlacementCount++;
@@ -1985,15 +2323,15 @@
             
             // Track opponent spending
             if (state.owner !== GameState.myColor && !GameState.isSetupPhase) {
-              if (state.buildingType === 1) {
+              if (buildingType === 1) {
                 this.trackOpponentSpend(state.owner, BUILD_COSTS.settlement);
-              } else if (state.buildingType === 2) {
+              } else if (buildingType === 2) {
                 this.trackOpponentSpend(state.owner, BUILD_COSTS.city);
               }
             }
             
             // If I just placed a settlement during setup
-            if (state.owner === GameState.myColor && state.buildingType === 1 && GameState.isSetupPhase) {
+            if (state.owner === GameState.myColor && buildingType === 1 && GameState.isSetupPhase) {
               // Check if I need to place another settlement (second player places 2 in a row)
               const needsAnotherSettlement = GameState.isSecondPlayer && GameState.setupPlacementCount === 1;
               
@@ -2212,8 +2550,13 @@
       // Skip if adjacent corner is occupied (distance rule)
       const neighbors = GameState.cornerToCorners[cId] || [];
       for (const neighborId of neighbors) {
-        const neighborOwner = GameState.corners[neighborId]?.owner;
+        const neighborCorner = GameState.corners[neighborId];
+        const neighborOwner = neighborCorner?.owner;
         if (neighborOwner !== null && neighborOwner !== undefined) {
+          if (DEBUG) {
+            const playerName = GameState.players[neighborOwner]?.username || `Player ${neighborOwner}`;
+            console.log(`${LOG_PREFIX} ⚠️ Corner ${cId} rejected: adjacent corner ${neighborId} is occupied by ${playerName}`);
+          }
           return null;
         }
       }
@@ -3232,11 +3575,101 @@
       
       console.log(`${LOG_PREFIX} ═══════════════════════════════════════════════════`);
       
+      // Show corner map
+      this.showCornerMap();
+      
       // Suggestions
       if (GameState.isSetupPhase) {
         this.suggestInitialPlacement();
       } else {
         this.suggestBuildPriority();
+      }
+    },
+    
+    /**
+     * Visualize corner map with IDs and coordinates
+     */
+    showCornerMap() {
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX} 🗺️ CORNER MAP:`);
+      console.log(`${LOG_PREFIX} `);
+      
+      // Group corners by y coordinate (rows)
+      const cornersByRow = {};
+      for (const [id, corner] of Object.entries(GameState.corners)) {
+        if (!corner || corner.y === undefined) continue;
+        const y = corner.y;
+        if (!cornersByRow[y]) cornersByRow[y] = [];
+        cornersByRow[y].push({ id: parseInt(id), ...corner });
+      }
+      
+      // Sort rows by y (top to bottom)
+      const sortedRows = Object.keys(cornersByRow).map(Number).sort((a, b) => b - a);
+      
+      // Display each row
+      for (const y of sortedRows) {
+        const corners = cornersByRow[y];
+        // Sort corners in row by x coordinate
+        corners.sort((a, b) => a.x - b.x);
+        
+        // Create row display
+        const rowParts = [];
+        for (const corner of corners) {
+          let display = `${corner.id}`;
+          
+          // Add ownership indicator
+          if (corner.owner !== null && corner.owner !== undefined) {
+            const player = GameState.players[corner.owner];
+            const isMe = corner.owner === GameState.myColor;
+            const building = corner.buildingType === 1 ? 'S' : 'C';
+            const color = isMe ? '🟥' : (corner.owner === 2 ? '🟦' : corner.owner === 3 ? '🟧' : '⬜');
+            display = `${color}${corner.id}${building}`;
+          } else {
+            // Check if available for settlement
+            const isAvailable = GameState.availableSettlements.includes(corner.id);
+            display = isAvailable ? `[${corner.id}]` : ` ${corner.id} `;
+          }
+          
+          // Add coordinate info in tooltip-style format
+          display += `(${corner.x},${corner.y},${corner.z})`;
+          rowParts.push(display.padEnd(12));
+        }
+        
+        console.log(`${LOG_PREFIX} Y=${y.toString().padStart(3)}: ${rowParts.join(' ')}`);
+      }
+      
+      console.log(`${LOG_PREFIX} `);
+      console.log(`${LOG_PREFIX} Legend:`);
+      console.log(`${LOG_PREFIX}   [N] = Available for settlement`);
+      console.log(`${LOG_PREFIX}   🟥NS = Your settlement (S) or city (C)`);
+      console.log(`${LOG_PREFIX}   🟦NS = Opponent settlement/city`);
+      console.log(`${LOG_PREFIX}   (x,y,z) = Coordinates`);
+      console.log(`${LOG_PREFIX} `);
+      
+      // Also show a compact adjacency map for key corners
+      const occupiedCorners = Object.entries(GameState.corners)
+        .filter(([id, c]) => c.owner !== null)
+        .map(([id, c]) => ({ id: parseInt(id), ...c }));
+      
+      if (occupiedCorners.length > 0) {
+        console.log(`${LOG_PREFIX} 📍 OCCUPIED CORNERS & NEIGHBORS:`);
+        for (const corner of occupiedCorners) {
+          const neighbors = GameState.cornerToCorners[corner.id] || [];
+          const player = GameState.players[corner.owner];
+          const building = corner.buildingType === 1 ? 'Settlement' : 'City';
+          const ownerName = player?.username || `Player ${corner.owner}`;
+          console.log(`${LOG_PREFIX}   Corner ${corner.id} (${corner.x},${corner.y},${corner.z}): ${ownerName}'s ${building}`);
+          if (neighbors.length > 0) {
+            const neighborInfo = neighbors.map(n => {
+              const nCorner = GameState.corners[n];
+              const nOwner = nCorner?.owner !== null ? 
+                (GameState.players[nCorner.owner]?.username || `P${nCorner.owner}`) : 'empty';
+              return `${n}(${nOwner})`;
+            }).join(', ');
+            console.log(`${LOG_PREFIX}      → Neighbors: ${neighborInfo}`);
+          }
+        }
+        console.log(`${LOG_PREFIX} `);
       }
     }
   };
@@ -3402,6 +3835,7 @@
       suggestRoad: () => Advisor.suggestRoadPlacement(),
       suggestBuild: () => Advisor.suggestBuildPriority(),
       scoreCorner: (id) => Advisor.scoreCorner(id),
+      showCornerMap: () => Advisor.showCornerMap(),
       getMessages: () => GameState.messageLog,
       reset: () => GameState.reset(),
       debug: { MessageParser, BoardBuilder, Advisor },
