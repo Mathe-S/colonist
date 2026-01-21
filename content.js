@@ -2202,18 +2202,19 @@
         if (!GameState.availableSettlements.includes(cId)) {
           return null;
         }
-      } else {
-        // Fallback: manual validation
-        // Skip if already occupied
-        if (corner.owner !== null && corner.owner !== undefined) return null;
-        
-        // Skip if adjacent corner is occupied (distance rule)
-        const neighbors = GameState.cornerToCorners[cId] || [];
-        for (const neighborId of neighbors) {
-          const neighborOwner = GameState.corners[neighborId]?.owner;
-          if (neighborOwner !== null && neighborOwner !== undefined) {
-            return null;
-          }
+      }
+      
+      // ALWAYS validate distance rule, even when using server data
+      // The server might send spots that are reachable but violate distance rule
+      // Skip if already occupied
+      if (corner.owner !== null && corner.owner !== undefined) return null;
+      
+      // Skip if adjacent corner is occupied (distance rule)
+      const neighbors = GameState.cornerToCorners[cId] || [];
+      for (const neighborId of neighbors) {
+        const neighborOwner = GameState.corners[neighborId]?.owner;
+        if (neighborOwner !== null && neighborOwner !== undefined) {
+          return null;
         }
       }
       
