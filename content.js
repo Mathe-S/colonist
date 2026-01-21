@@ -1217,60 +1217,231 @@
         });
       });
       
-      // Render corners (settlements/cities)
+      // Group corners by row (y coordinate) for positioning
+      const cornersByRow = {};
+      for (const corner of corners) {
+        if (corner.owner === null || corner.owner === undefined) continue;
+        if (corner.y === undefined) continue;
+        const y = corner.y;
+        if (!cornersByRow[y]) cornersByRow[y] = [];
+        cornersByRow[y].push(corner);
+      }
+      
+      // Helper function to get screen position of a tile by its ID
+      const getTileScreenPosById = (tileId) => {
+        const tile = GameState.tiles[tileId];
+        if (!tile || tile.x === undefined || tile.y === undefined) return null;
+        const rowIndex = sortedRows.indexOf(tile.y);
+        if (rowIndex === -1) return null;
+        const rowTiles = tilesByRow[tile.y].sort((a, b) => a.x - b.x);
+        const rowOffset = getRowOffset(rowIndex, rowTiles.length);
+        // Match by id (tiles in renderHexMap have id property) or by coordinates as fallback
+        const colIndex = rowTiles.findIndex(t => (t.id === parseInt(tileId)) || (t.x === tile.x && t.y === tile.y));
+        if (colIndex === -1) return null;
+        return {
+          x: rowOffset + colIndex * hexWidth + hexWidth * 0.5,
+          y: rowIndex * hexHeight + hexHeight * 0.5
+        };
+      };
+      
+      // Helper function to get corner screen position from hex coordinates
+      // A corner's position is at the intersection of 3 hexagons
+      const getCornerScreenPos = (corner) => {
+        if (corner.x === undefined || corner.y === undefined) return null;
+        
+        // Get the tiles this corner touches
+        const tileIds = GameState.cornerToTiles[corner.id] || [];
+        if (tileIds.length < 2) return null;
+        
+        // Calculate position as average of the 3 tile centers
+        const tilePositions = tileIds.map(tid => getTileScreenPosById(tid)).filter(p => p !== null);
+        if (tilePositions.length < 2) return null;
+        
+        // Average of all tile positions gives us the intersection point
+        const avgX = tilePositions.reduce((sum, p) => sum + p.x, 0) / tilePositions.length;
+        const avgY = tilePositions.reduce((sum, p) => sum + p.y, 0) / tilePositions.length;
+        
+        return { x: avgX, y: avgY };
+      };
+      
+      // Render corners (settlements/cities) at exact tile intersections
       for (const corner of corners) {
         if (corner.owner === null || corner.owner === undefined) continue;
         
-        // Find corner position from adjacent tiles
-        const tileIds = GameState.cornerToTiles[corner.id] || [];
-        if (tileIds.length === 0) continue;
-        
-        // Get tiles and find their positions
-        const cornerTiles = tileIds.map(tid => GameState.tiles[tid]).filter(t => t && t.x !== undefined && t.y !== undefined);
-        if (cornerTiles.length === 0) continue;
-        
-        // Find which row the corner is in (use the most common y coordinate)
-        const yCounts = {};
-        cornerTiles.forEach(t => { yCounts[t.y] = (yCounts[t.y] || 0) + 1; });
-        const cornerY = parseInt(Object.keys(yCounts).reduce((a, b) => yCounts[a] > yCounts[b] ? a : b));
-        const rowIndex = sortedRows.indexOf(cornerY);
-        if (rowIndex === -1) continue;
-        
-        // Get average x position
-        const avgX = cornerTiles.reduce((sum, t) => sum + t.x, 0) / cornerTiles.length;
-        const rowTiles = tilesByRow[cornerY].sort((a, b) => a.x - b.x);
-        const rowOffset = getRowOffset(rowIndex, rowTiles.length);
-        
-        // Find closest tile in row to position corner
-        const closestTile = rowTiles.reduce((closest, tile) => 
-          Math.abs(tile.x - avgX) < Math.abs(closest.x - avgX) ? tile : closest
-        );
-        const colIndex = rowTiles.indexOf(closestTile);
-        
-        const screenX = rowOffset + colIndex * hexWidth + hexWidth * 0.5;
-        const screenY = rowIndex * hexHeight + hexHeight * 0.5;
+        const pos = getCornerScreenPos(corner);
+        if (!pos) continue;
         
         const isMe = corner.owner === GameState.myColor;
         const building = corner.buildingType === 1 ? '🏠' : '🏰';
         const borderColor = isMe ? '#4caf50' : '#ff5722';
+        const tileIds = GameState.cornerToTiles[corner.id] || [];
+        // Show tile ID, resource type, and dice number for debugging
+        // Try both string and number keys since GameState.tiles uses string keys but cornerToTiles might have numbers
+        const tileInfo = tileIds.map(tid => {
+          // Try string key first (most common)
+          let t = GameState.tiles[String(tid)];
+          // Fallback to number key
+          if (!t) t = GameState.tiles[tid];
+          
+          if (!t) {
+            return `Tile ${tid}: ? (not found)`;
+          }
+          if (t.type === 0) {
+            return `Tile ${tid}: desert`;
+          }
+          const resourceName = TILE_TYPES[t.type] || 'unknown';
+          return `Tile ${tid}: ${resourceName}(${t.diceNumber})`;
+        }).join(', ');
         
         html += `
           <div style="
             position: absolute;
-            left: ${screenX - 8}px;
-            top: ${screenY - 8}px;
-            width: 16px;
-            height: 16px;
+            left: ${pos.x - 10}px;
+            top: ${pos.y - 10}px;
+            width: 20px;
+            height: 20px;
             background: ${isMe ? '#4caf50' : '#ff5722'};
-            border: 2px solid ${borderColor};
+            border: 3px solid ${borderColor};
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 10px;
-            z-index: 20;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.8);
-          " title="Corner ${corner.id}">${building}</div>
+            font-size: 12px;
+            z-index: 25;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.9);
+          " title="Corner ${corner.id} - ${tileInfo}">${building}</div>
+        `;
+      }
+      
+      // Render road suggestions if available (always show when roads are available)
+      const shouldShowRoads = GameState.availableRoads.length > 0;
+      
+      if (shouldShowRoads) {
+        // Score roads to show best ones
+        const scoredRoads = [];
+        for (const edgeId of GameState.availableRoads.slice(0, 15)) {
+          const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+          if (c1 === undefined || c2 === undefined) continue;
+          
+          // Get corner objects
+          const corner1 = GameState.corners[c1];
+          const corner2 = GameState.corners[c2];
+          if (!corner1 || !corner2) continue;
+          
+          // Get corner positions using the same function
+          const pos1 = getCornerScreenPos(corner1);
+          const pos2 = getCornerScreenPos(corner2);
+          if (!pos1 || !pos2) continue;
+          
+          // Score this road
+          let score = 0;
+          // Check if it leads to a good settlement spot
+          for (const cid of [c1, c2]) {
+            if (GameState.availableSettlements.includes(cid)) {
+              const cornerScore = Advisor.scoreCorner(cid, true);
+              if (cornerScore) score += cornerScore.score;
+            }
+          }
+          
+          scoredRoads.push({
+            edgeId,
+            score,
+            x1: pos1.x,
+            y1: pos1.y,
+            x2: pos2.x,
+            y2: pos2.y
+          });
+        }
+        
+        // Sort by score and render top roads
+        scoredRoads.sort((a, b) => b.score - a.score);
+        
+        for (let i = 0; i < Math.min(5, scoredRoads.length); i++) {
+          const road = scoredRoads[i];
+          const isTop = i === 0;
+          const length = Math.sqrt(Math.pow(road.x2 - road.x1, 2) + Math.pow(road.y2 - road.y1, 2));
+          const angle = Math.atan2(road.y2 - road.y1, road.x2 - road.x1) * 180 / Math.PI;
+          const midX = (road.x1 + road.x2) / 2;
+          const midY = (road.y1 + road.y2) / 2;
+          
+          html += `
+            <div style="
+              position: absolute;
+              left: ${road.x1}px;
+              top: ${road.y1}px;
+              width: ${length}px;
+              height: ${isTop ? '6' : '4'}px;
+              background: ${isTop ? 'rgba(255, 215, 0, 0.8)' : 'rgba(255, 255, 0, 0.6)'};
+              border: ${isTop ? '2px' : '1px'} solid ${isTop ? '#ffd700' : 'rgba(255, 255, 0, 0.9)'};
+              border-radius: ${isTop ? '3' : '2'}px;
+              transform: rotate(${angle}deg);
+              transform-origin: 0 50%;
+              z-index: ${isTop ? 18 : 15};
+              pointer-events: none;
+              box-shadow: ${isTop ? '0 2px 4px rgba(255, 215, 0, 0.5)' : 'none'};
+            " title="${isTop ? '⭐ Best' : ''} Road Edge ${road.edgeId} (Score: ${Math.round(road.score)})"></div>
+          `;
+          
+          // Add a marker at the midpoint for top road
+          if (isTop) {
+            html += `
+              <div style="
+                position: absolute;
+                left: ${midX - 6}px;
+                top: ${midY - 6}px;
+                width: 12px;
+                height: 12px;
+                background: #ffd700;
+                border: 2px solid #ffaa00;
+                border-radius: 50%;
+                z-index: 19;
+                pointer-events: none;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+              " title="⭐ Best Road"></div>
+            `;
+          }
+        }
+      }
+      
+      // Render edge numbers for all edges (so user can identify which edge to build on)
+      const allEdges = Object.entries(GameState.edges || {});
+      for (const [edgeId, edge] of allEdges) {
+        if (!edge || edge.x === undefined || edge.y === undefined) continue;
+        
+        const [c1, c2] = GameState.edgeToCorners[edgeId] || [];
+        if (c1 === undefined || c2 === undefined) continue;
+        
+        const corner1 = GameState.corners[c1];
+        const corner2 = GameState.corners[c2];
+        if (!corner1 || !corner2) continue;
+        
+        const pos1 = getCornerScreenPos(corner1);
+        const pos2 = getCornerScreenPos(corner2);
+        if (!pos1 || !pos2) continue;
+        
+        const midX = (pos1.x + pos2.x) / 2;
+        const midY = (pos1.y + pos2.y) / 2;
+        const isAvailable = GameState.availableRoads.includes(parseInt(edgeId));
+        
+        html += `
+          <div style="
+            position: absolute;
+            left: ${midX - 12}px;
+            top: ${midY - 8}px;
+            width: 24px;
+            height: 16px;
+            background: ${isAvailable ? 'rgba(255, 255, 0, 0.3)' : 'rgba(100, 100, 100, 0.2)'};
+            border: 1px solid ${isAvailable ? '#ffd700' : '#666'};
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: bold;
+            color: ${isAvailable ? '#ffd700' : '#aaa'};
+            z-index: 12;
+            pointer-events: none;
+          " title="Edge ${edgeId}${isAvailable ? ' (Available)' : ''}">${edgeId}</div>
         `;
       }
       
@@ -1280,6 +1451,7 @@
       html += `<div style="margin-top: 8px; font-size: 9px; color: #888; line-height: 1.4;">`;
       html += `<div><strong>Resources:</strong> 🌲 Wood | 🧱 Brick | 🐑 Sheep | 🌾 Wheat | ⛏️ Ore | 🏜️ Desert</div>`;
       html += `<div><strong>Buildings:</strong> 🟢 🏠 = Yours | 🔴 🏠 = Opponent | 🦹 = Robber</div>`;
+      html += `<div><strong>Edges:</strong> Yellow numbers = Available roads | Gray numbers = Other edges</div>`;
       html += `</div>`;
       
       html += '</div>';
@@ -2548,15 +2720,39 @@
       if (corner.owner !== null && corner.owner !== undefined) return null;
       
       // Skip if adjacent corner is occupied (distance rule)
+      // Check both edge-connected neighbors AND corners that share tiles
       const neighbors = GameState.cornerToCorners[cId] || [];
+      const myTileIds = new Set((GameState.cornerToTiles[cId] || []).map(id => parseInt(id)));
+      
+      // Check edge-connected neighbors
       for (const neighborId of neighbors) {
         const neighborCorner = GameState.corners[neighborId];
-        const neighborOwner = neighborCorner?.owner;
+        if (!neighborCorner) continue;
+        const neighborOwner = neighborCorner.owner;
         if (neighborOwner !== null && neighborOwner !== undefined) {
-          if (DEBUG) {
-            const playerName = GameState.players[neighborOwner]?.username || `Player ${neighborOwner}`;
-            console.log(`${LOG_PREFIX} ⚠️ Corner ${cId} rejected: adjacent corner ${neighborId} is occupied by ${playerName}`);
-          }
+          const playerName = GameState.players[neighborOwner]?.username || `Player ${neighborOwner}`;
+          console.log(`${LOG_PREFIX} ⚠️ Corner ${cId} rejected: edge-adjacent corner ${neighborId} is occupied by ${playerName}`);
+          return null;
+        }
+      }
+      
+      // Check corners that share tiles (also violates distance rule)
+      
+      for (const [otherCornerId, otherCorner] of Object.entries(GameState.corners)) {
+        const otherId = parseInt(otherCornerId);
+        if (otherId === cId) continue;
+        if (otherCorner.owner === null || otherCorner.owner === undefined) continue;
+        
+        const otherTileIds = new Set((GameState.cornerToTiles[otherCornerId] || []).map(id => parseInt(id)));
+        // Check if they share any tiles
+        const sharedTiles = [...myTileIds].filter(tid => otherTileIds.has(tid));
+        if (sharedTiles.length > 0) {
+          const playerName = GameState.players[otherCorner.owner]?.username || `Player ${otherCorner.owner}`;
+          const sharedTileNumbers = sharedTiles.map(tid => {
+            const t = GameState.tiles[tid];
+            return t ? t.diceNumber : tid;
+          }).join(',');
+          console.log(`${LOG_PREFIX} ⚠️ Corner ${cId} rejected: shares tiles [${sharedTiles.join(',')}] (numbers: ${sharedTileNumbers}) with corner ${otherCornerId} occupied by ${playerName}`);
           return null;
         }
       }
